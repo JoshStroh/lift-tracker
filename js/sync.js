@@ -2,7 +2,8 @@
 //
 // Layout in the repo:   <folder>/sessions/<id>.json
 //                       <folder>/exercises/<id>.json
-//                       <folder>/routines/<id>.json
+//                       <folder>/plans/<id>.json
+//                       <folder>/calisthenics/cali-progress.json
 //
 // Algorithm (one sync = at most one commit):
 //   1. Read the branch head and its full file tree (one recursive tree request).
@@ -15,7 +16,7 @@
 import * as store from './store.js';
 
 const API = 'https://api.github.com';
-const DIRS = { session: 'sessions', exercise: 'exercises', routine: 'routines' };
+const DIRS = { session: 'sessions', exercise: 'exercises', plan: 'plans', cali: 'calisthenics' };
 
 class GitHubError extends Error {
   constructor(status, message) { super(message); this.status = status; }

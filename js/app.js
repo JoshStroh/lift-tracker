@@ -1,8 +1,11 @@
 import * as store from './store.js';
 import { sync } from './sync.js';
-import { DAY_TEMPLATES, CATEGORIES, KINDS, searchExercises } from './exercises.js';
+import { DAY_TEMPLATES, CATEGORIES, KINDS, searchExercises, isCalisthenics } from './exercises.js';
 import * as stats from './stats.js';
+import * as cali from './cali.js';
+import * as gen from './generator.js';
 import { lineChart } from './chart.js';
+import { go, openModal, closeModal, actionSheet, runSheetAction, toast, thumb, visual, openInfo, infoHTML } from './ui.js';
 import { esc, uid, localDate, fmtNum, fmtDate, fmtTime, fmtDuration, fmtClock } from './util.js';
 
 const main = document.getElementById('main');
@@ -11,37 +14,42 @@ const modal = document.getElementById('modal');
 const restBar = document.getElementById('rest');
 const tabs = document.getElementById('tabs');
 
-// ---------------------------------------------------------------- routing
+// ================================================================ routing
 
 function route() {
   const parts = (location.hash.replace(/^#\/?/, '') || 'workout').split('/');
   return { name: parts[0], id: parts[1] ? decodeURIComponent(parts[1]) : null, sub: parts[2] || null };
 }
-const go = (hash) => { location.hash = hash; };
 
 let mainDirty = false;
+const typing = () => {
+  const a = document.activeElement;
+  return a && main.contains(a) && a.matches('input:not([type=date]), textarea');
+};
+
 function render() {
   renderHeader();
-  const active = document.activeElement;
-  if (active && main.contains(active) && active.matches('input, textarea')) {
-    mainDirty = true; // don't yank the keyboard away; re-render on blur
-    return;
-  }
+  if (typing()) { mainDirty = true; return; } // don't yank the keyboard away; re-render on blur
   mainDirty = false;
   renderMain();
 }
 
+const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali' };
+
 function renderMain() {
   const r = route();
-  for (const a of tabs.querySelectorAll('a')) a.classList.toggle('on', a.dataset.tab === tabFor(r.name));
+  for (const a of tabs.querySelectorAll('a')) a.classList.toggle('on', a.dataset.tab === (TAB_FOR[r.name] || r.name));
   const scroll = window.scrollY;
   const sameView = main.dataset.view === location.hash;
   main.dataset.view = location.hash;
   switch (r.name) {
     case 'history': main.innerHTML = viewHistory(); break;
-    case 'session': r.sub === 'edit' ? (main.innerHTML = viewEditor(store.getDoc(r.id), true)) : (main.innerHTML = viewSession(r.id)); break;
+    case 'session': main.innerHTML = r.sub === 'edit' ? viewEditor(store.getDoc(r.id), true) : viewSession(r.id); break;
     case 'progress': main.innerHTML = viewProgress(); break;
     case 'exercise': main.innerHTML = viewExercise(r.id); drawExerciseChart(r.id); break;
+    case 'plan': main.innerHTML = viewPlan(r.id); break;
+    case 'cali': main.innerHTML = viewCali(); break;
+    case 'track': main.innerHTML = viewTrack(r.id); break;
     case 'settings': main.innerHTML = viewSettings(); break;
     default: {
       const s = store.activeSession();
@@ -52,13 +60,9 @@ function renderMain() {
   tick();
 }
 
-const tabFor = (name) => ({ session: 'history', exercise: 'progress' }[name] || name);
+document.addEventListener('focusout', () => setTimeout(() => { if (mainDirty && !typing()) renderMain(); }, 0));
 
-document.addEventListener('focusout', () => setTimeout(() => {
-  if (mainDirty && !(document.activeElement && main.contains(document.activeElement) && document.activeElement.matches('input, textarea'))) renderMain();
-}, 0));
-
-// ---------------------------------------------------------------- header
+// ================================================================ header
 
 function renderHeader() {
   const sy = store.state.sync;
@@ -70,9 +74,7 @@ function renderHeader() {
     else if (unsynced) { cls = 'busy'; text = `${unsynced} to sync`; }
     else { cls = 'ok'; text = sy.lastAt ? `Synced ${ago(sy.lastAt)}` : 'Synced'; }
   }
-  header.innerHTML = `
-    <span class="brand">Lift Tracker</span>
-    <a class="sync ${cls}" href="#/settings"><i></i>${esc(text)}</a>`;
+  header.innerHTML = `<span class="brand">Lift Tracker</span><a class="sync ${cls}" href="#/settings"><i></i>${esc(text)}</a>`;
 }
 
 function ago(iso) {
@@ -90,19 +92,67 @@ function daysAgo(iso) {
   return `${d} days ago`;
 }
 
-// ---------------------------------------------------------------- start screen
+const dayLabel = (ymd) => {
+  const today = localDate();
+  const tomorrow = localDate(new Date(Date.now() + 86400000));
+  if (ymd === today) return 'Today';
+  if (ymd === tomorrow) return 'Tomorrow';
+  return fmtDate(ymd + 'T12:00:00', { weekday: 'long', day: 'numeric', month: 'short' });
+};
+
+// ================================================================ start screen + planner
+
+let selectedDay = null;
+
+const plansFor = (ymd) => store.docs('plan').filter((p) => p.date === ymd && !p.doneSessionId);
+const savedPlans = () => store.docs('plan')
+  .filter((p) => !p.doneSessionId && (!p.date || p.date >= localDate()))
+  .sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
 
 function viewStart() {
+  const today = localDate();
+  if (!selectedDay || selectedDay < today) selectedDay = today;
   const finished = store.finishedSessions();
+  const doneDays = new Set(finished.map((s) => localDate(new Date(s.startedAt))));
+  const days = Array.from({ length: 7 }, (_, i) => localDate(new Date(Date.now() + i * 86400000)));
+
   const lastByDay = {};
   for (const s of finished) if (s.dayId && !lastByDay[s.dayId]) lastByDay[s.dayId] = s;
-  // Suggest the push/pull/legs day done least recently.
   const ppl = DAY_TEMPLATES.filter((d) => d.id !== 'rt-abs');
   const next = ppl.slice().sort((a, b) => (lastByDay[a.id]?.startedAt || '').localeCompare(lastByDay[b.id]?.startedAt || ''))[0];
 
-  const recent = finished.slice(0, 3);
+  const dayPlans = plansFor(selectedDay);
+  const others = savedPlans().filter((p) => !dayPlans.includes(p));
+  const recent = finished.slice(0, 2);
+
   return `
-    <h1>Start a workout</h1>
+    <h1>Workout</h1>
+    <div class="week" role="tablist">
+      ${days.map((d) => {
+        const dt = new Date(d + 'T12:00:00');
+        const planned = plansFor(d).length;
+        return `<button class="wday ${d === selectedDay ? 'on' : ''}" data-act="pick-day" data-day="${d}">
+          <span class="wd">${d === today ? 'Today' : esc(dt.toLocaleDateString(undefined, { weekday: 'short' }))}</span>
+          <span class="wn">${dt.getDate()}</span>
+          <span class="wdot">${doneDays.has(d) ? '✓' : planned ? '●' : ''}</span>
+        </button>`;
+      }).join('')}
+    </div>
+    <section class="day-plans">
+      <div class="row between"><h2 class="inline">${esc(dayLabel(selectedDay))}</h2></div>
+      ${dayPlans.length ? dayPlans.map((p) => planCard(p, true)).join('') : `
+        <div class="card empty-day">
+          <span class="muted">Nothing planned${selectedDay === today ? ' for today' : ''}.</span>
+          <button class="link-btn" data-act="wizard" data-mode="auto" data-date="${selectedDay}">Plan one</button>
+        </div>`}
+    </section>
+
+    <div class="make-row">
+      <button class="make" data-act="wizard" data-mode="own"><span class="make-icon">✏️</span><span><strong>Build my own</strong><small>Pick the exercises</small></span></button>
+      <button class="make" data-act="wizard" data-mode="auto"><span class="make-icon">✨</span><span><strong>Create for me</strong><small>A workout in one tap</small></span></button>
+    </div>
+
+    <h2>Quick start</h2>
     <div class="days">
       ${DAY_TEMPLATES.map((d) => `
         <button class="day ${d.id}" data-act="start-day" data-day="${d.id}">
@@ -111,38 +161,174 @@ function viewStart() {
           ${d.id === next.id ? '<span class="badge">Up next</span>' : ''}
         </button>`).join('')}
     </div>
-    <button class="btn wide ghost" data-act="start-empty">Empty workout</button>
+    <div class="row gap two">
+      <button class="btn ghost" data-act="start-cali">🤸 Calisthenics</button>
+      <button class="btn ghost" data-act="start-empty">Empty workout</button>
+    </div>
+
+    ${others.length ? `<h2>Saved plans</h2>${others.map((p) => planCard(p, false)).join('')}` : ''}
     ${recent.length ? `<h2>Recent</h2>${recent.map(sessionCard).join('')}` : `
       <div class="card hint">
         <p><strong>How it works</strong></p>
-        <p>Pick a day. The first time, you get a starter list of exercises; after that, each day starts with the exercises you did last time, with last time's numbers shown next to every set.</p>
+        <p>Use <strong>Quick start</strong> for your Push / Pull / Legs days — each one starts with what you did last time. <strong>Create for me</strong> builds a new workout; <strong>Build my own</strong> lets you choose. Either can be saved for a future day.</p>
         <p>Set up GitHub sync in <a href="#/settings">Settings</a> so your history is backed up.</p>
       </div>`}
   `;
 }
 
+function planCard(p, showStart) {
+  const names = p.exercises.map((e) => store.exerciseName(e.exerciseId));
+  return `
+    <div class="card plan-card">
+      <a class="plan-main" href="#/plan/${encodeURIComponent(p.id)}">
+        <div class="row between"><strong>${esc(p.name)}</strong><span class="muted small">${p.date ? esc(dayLabel(p.date)) : 'Any day'}</span></div>
+        <div class="small muted ex-list">${names.length ? esc(names.slice(0, 6).join(', ')) + (names.length > 6 ? ` +${names.length - 6}` : '') : 'No exercises yet'}</div>
+      </a>
+      ${showStart || !p.date ? `<button class="btn primary small-btn" data-act="start-plan" data-id="${esc(p.id)}" ${p.exercises.length ? '' : 'disabled'}>Start</button>` : ''}
+    </div>`;
+}
+
 function blankSet() { return { kg: null, reps: null, sec: null, done: false }; }
+
+function lastSidesFor(exerciseId) {
+  for (const s of store.finishedSessions()) {
+    const e = s.exercises.find((x) => x.exerciseId === exerciseId);
+    if (e) return !!e.sides;
+  }
+  return null;
+}
+const defaultSides = (exerciseId) => lastSidesFor(exerciseId) ?? !!store.getExercise(exerciseId).sided;
+
+function sessionExercise(exerciseId, n, extra = {}) {
+  return { exerciseId, sets: Array.from({ length: n }, blankSet), sides: extra.sides ?? defaultSides(exerciseId), target: extra.target || '', track: extra.track || undefined };
+}
 
 async function startDay(dayId) {
   const t = DAY_TEMPLATES.find((d) => d.id === dayId);
   const last = store.finishedSessions().find((s) => s.dayId === dayId);
   const exercises = last
-    ? last.exercises.map((e) => ({ exerciseId: e.exerciseId, sets: e.sets.map(blankSet) }))
-    : t.exercises.map((id) => ({ exerciseId: id, sets: [blankSet(), blankSet(), blankSet()] }));
-  await newSession(t.name, dayId, exercises);
+    ? last.exercises.map((e) => sessionExercise(e.exerciseId, e.sets.length, { sides: e.sides, target: e.target }))
+    : t.exercises.map((id) => sessionExercise(id, 3));
+  await newSession(t.name, { dayId }, exercises);
 }
 
-async function newSession(name, dayId, exercises) {
+async function startPlan(planId) {
+  const p = store.getDoc(planId);
+  if (!p) return;
+  const exercises = p.exercises.map((e) => sessionExercise(e.exerciseId, e.sets || 3, e));
+  await newSession(p.name, { planId: p.id, dayId: p.dayId === 'push' ? 'rt-push' : p.dayId === 'pull' ? 'rt-pull' : p.dayId === 'legs' ? 'rt-legs' : null }, exercises);
+}
+
+async function startCali() {
+  const s = cali.todaysSession();
+  await newSession(s.name, { dayId: 'cali' }, s.exercises.map((e) => sessionExercise(e.exerciseId, e.sets, e)));
+}
+
+async function newSession(name, meta, exercises) {
+  if (store.activeSession()) { toast('Finish or discard the current workout first'); go('#/workout'); return; }
   const now = new Date().toISOString();
-  await store.saveDoc({ id: `${localDate()}-${uid()}`, type: 'session', name, dayId, startedAt: now, endedAt: null, notes: '', exercises });
+  await store.saveDoc({ id: `${localDate()}-${uid()}`, type: 'session', name, dayId: meta.dayId || null, planId: meta.planId || null, startedAt: now, endedAt: null, notes: '', exercises });
   go('#/workout');
   window.scrollTo(0, 0);
 }
 
-// ---------------------------------------------------------------- workout editor
+// ================================================================ wizard ("Build my own" / "Create for me")
+
+let wiz = null;
+
+function openWizard(mode, date) {
+  wiz = { mode, dayType: wiz?.dayType || 'push', style: wiz?.style || 'conventional', length: wiz?.length || 'normal', date: date ?? (selectedDay && selectedDay !== localDate() ? selectedDay : localDate()) };
+  renderWizard();
+}
+
+function renderWizard() {
+  const chips = (field, list) => list.map((x) => `
+    <button class="choice ${wiz[field] === x.id ? 'on' : ''}" data-act="wiz-set" data-field="${field}" data-val="${x.id}">
+      <strong>${esc(x.name)}</strong>${x.blurb ? `<small>${esc(x.blurb)}</small>` : ''}
+    </button>`).join('');
+  openModal(`
+    <div class="info-head"><span></span><button class="link-btn" data-act="close-modal">Cancel</button></div>
+    <h2 class="info-title">${wiz.mode === 'own' ? '✏️ Build my own' : '✨ Create for me'}</h2>
+    <h4>What are you training?</h4>
+    <div class="choices three">${chips('dayType', gen.DAY_TYPES)}</div>
+    ${wiz.dayType === 'stretch' ? '' : `<h4>Style</h4><div class="choices three">${chips('style', gen.STYLES)}</div>`}
+    ${wiz.style !== 'conventional' && wiz.dayType !== 'stretch' && !Object.keys(cali.progress().levels || {}).length ? '<p class="small note">Tip: set your level on each track in the <strong>Calisthenics</strong> tab first, so bodyweight exercises match what you can do.</p>' : ''}
+    ${wiz.mode === 'auto' ? `<h4>Length</h4><div class="choices three">${chips('length', gen.LENGTHS.map((l) => ({ ...l, blurb: `${l.n} exercises` })))}</div>` : ''}
+    <h4>When?</h4>
+    <div class="row gap when">
+      <input type="date" id="wiz-date" value="${esc(wiz.date || '')}" min="${localDate()}">
+      <button class="choice slim ${!wiz.date ? 'on' : ''}" data-act="wiz-nodate">No date</button>
+    </div>
+    <button class="btn wide primary" data-act="wiz-create">${wiz.mode === 'own' ? 'Choose exercises' : 'Create workout'}</button>
+  `, { cls: 'wizard' });
+}
+
+async function createFromWizard() {
+  const d = document.getElementById('wiz-date')?.value;
+  if (d !== undefined) wiz.date = d || null;
+  const exercises = wiz.mode === 'auto' ? gen.generate(wiz) : [];
+  const plan = {
+    id: 'pl-' + uid(), type: 'plan', name: gen.planName(wiz.dayType, wiz.style), dayId: wiz.dayType,
+    style: wiz.dayType === 'stretch' ? 'mixed' : wiz.style, date: wiz.date || null, exercises, generated: wiz.mode === 'auto', createdAt: new Date().toISOString(),
+  };
+  closeModal();
+  await store.saveDoc(plan, { render: false });
+  go(`#/plan/${encodeURIComponent(plan.id)}`);
+  if (wiz.mode === 'own') setTimeout(() => openPicker({ type: 'plan-add', planId: plan.id }), 80);
+}
+
+// ================================================================ plan editor
+
+function viewPlan(id) {
+  const p = store.getDoc(id);
+  if (!p) return '<a class="back" href="#/workout">‹ Workout</a><p class="muted pad">Plan not found.</p>';
+  const typeName = gen.DAY_TYPES.find((d) => d.id === p.dayId)?.name;
+  const styleName = gen.STYLES.find((s) => s.id === p.style)?.name;
+  return `
+    <a class="back" href="#/workout">‹ Workout</a>
+    <input class="title-input" data-plan-field="name" value="${esc(p.name)}" aria-label="Plan name">
+    <div class="chips">${typeName ? `<span class="chip">${esc(typeName)}</span>` : ''}${styleName && p.dayId !== 'stretch' ? `<span class="chip">${esc(styleName)}</span>` : ''}</div>
+    <label class="field inline-field">Date
+      <span class="row gap"><input type="date" data-plan-field="date" value="${esc(p.date || '')}"><button class="link-btn" data-act="plan-nodate">No date</button></span>
+    </label>
+    ${p.exercises.map((e, i) => planRow(p, e, i)).join('') || '<p class="muted pad center">No exercises yet.</p>'}
+    <button class="btn wide" data-act="plan-add">+ Add exercise</button>
+    ${p.generated ? '<button class="btn wide ghost" data-act="plan-regen">✨ Generate again</button>' : ''}
+    <div class="plan-actions">
+      <button class="btn primary" data-act="start-plan" data-id="${esc(p.id)}" ${p.exercises.length ? '' : 'disabled'}>Start now</button>
+      <button class="btn" data-act="plan-save">Save${p.date ? ` for ${esc(/^To/.test(dayLabel(p.date)) ? dayLabel(p.date).toLowerCase() : fmtDate(p.date + 'T12:00:00', { weekday: 'short', day: 'numeric' }))}` : ''}</button>
+    </div>
+    <button class="btn wide danger-text" data-act="plan-delete">Delete plan</button>
+  `;
+}
+
+function planRow(p, e, i) {
+  const ex = store.getExercise(e.exerciseId);
+  const unit = ex.kind === 'time' ? '' : ' reps';
+  return `
+    <div class="card plan-row">
+      <button class="thumb-btn" data-act="info" data-id="${esc(ex.id)}" aria-label="How to do ${esc(ex.name)}">${thumb(ex)}</button>
+      <div class="plan-row-main">
+        <div class="row between"><strong>${esc(ex.name)}</strong>
+          <span class="row">${e.pattern || p.generated ? `<button class="icon" data-act="plan-shuffle" data-i="${i}" aria-label="Swap for another">↻</button>` : ''}<button class="icon" data-act="plan-menu" data-i="${i}" aria-label="Options">⋯</button></span>
+        </div>
+        <div class="row gap small sets-line">
+          <span class="stepper"><button data-act="plan-sets" data-i="${i}" data-d="-1">−</button><span>${e.sets || 3}</span><button data-act="plan-sets" data-i="${i}" data-d="1">+</button></span>
+          <span class="muted">sets ×</span>
+          <input class="target" data-plan-target="${i}" value="${esc(e.target || '')}" placeholder="${ex.kind === 'time' ? '30s' : '8–12'}" aria-label="Target">
+          <span class="muted">${unit}${e.sides ? ' each side' : ''}</span>
+        </div>
+        ${e.track ? `<div class="small muted">🤸 ${esc(cali.getTrack(e.track)?.name || '')} track</div>` : ''}
+      </div>
+    </div>`;
+}
+
+const editingPlan = () => (route().name === 'plan' ? store.getDoc(route().id) : null);
+
+// ================================================================ workout editor
 
 function viewEditor(s, editing) {
-  if (!s) return `<p class="muted pad">Workout not found.</p>`;
+  if (!s) return '<p class="muted pad">Workout not found.</p>';
   return `
     <div class="session-head">
       <div>
@@ -165,38 +351,62 @@ function exerciseBlock(s, e, i, editing) {
   const prev = prior.length ? prior[prior.length - 1].sets : [];
   const best = stats.bestSet(kind, prior.flatMap((h) => h.sets));
   const bestScore = best ? stats.score(kind, best) : null;
+  const imb = e.sides ? stats.imbalance(kind, prev) : null;
+  const track = e.track ? cali.getTrack(e.track) : null;
+  const trackStep = track ? track.steps.find((st) => st.exerciseId === e.exerciseId) : null;
 
+  const fields = kind === 'weight' ? [['kg', 'decimal'], ['reps', 'numeric']] : kind === 'reps' ? [['reps', 'numeric']] : [['sec', 'text']];
   const cols = kind === 'weight' ? ['kg', 'Reps'] : kind === 'reps' ? ['Reps'] : ['Time'];
+
+  const input = (field, st, p, j) => {
+    const raw = st[field];
+    const val = field.startsWith('sec') ? (raw != null ? stats.fmtSec(raw) : '') : raw ?? '';
+    const ph = p ? (field.startsWith('sec') ? stats.fmtSec(p[field]) : p[field] ?? '') : '';
+    const mode = field.startsWith('kg') ? 'decimal' : field.startsWith('sec') ? 'text' : 'numeric';
+    return `<input data-field="${field}" data-ex="${i}" data-set="${j}" inputmode="${mode}" value="${esc(val)}" placeholder="${esc(ph)}" autocomplete="off" enterkeyhint="next">`;
+  };
+
   const rows = e.sets.map((st, j) => {
     const p = prev[j] || prev[prev.length - 1];
     const isPR = st.done && bestScore != null && stats.isValidSet(kind, st) && stats.score(kind, st) > bestScore + 1e-9;
-    const input = (field, val, ph, mode) =>
-      `<input data-field="${field}" data-ex="${i}" data-set="${j}" inputmode="${mode}" value="${val ?? ''}" placeholder="${ph ?? ''}" autocomplete="off" enterkeyhint="done">`;
-    const cells = kind === 'weight'
-      ? input('kg', st.kg, p?.kg, 'decimal') + '</td><td>' + input('reps', st.reps, p?.reps, 'numeric')
-      : kind === 'reps'
-        ? input('reps', st.reps, p?.reps, 'numeric')
-        : input('sec', st.sec != null ? stats.fmtSec(st.sec) : '', p ? stats.fmtSec(p.sec) : '', 'text');
-    return `
-      <tr class="${st.done ? 'done' : ''}">
-        <td><button class="setno" data-act="set-menu" data-ex="${i}" data-set="${j}">${j + 1}</button></td>
+    const check = `<button class="check" data-act="toggle-set" data-ex="${i}" data-set="${j}" aria-label="Done">${isPR ? '🏆' : '✓'}</button>`;
+    const setno = `<button class="setno" data-act="set-menu" data-ex="${i}" data-set="${j}">${j + 1}</button>`;
+    if (!e.sides) {
+      return `<tr class="${st.done ? 'done' : ''}">
+        <td>${setno}</td>
         <td class="prev">${esc(stats.shortLabel(kind, prev[j]) || '—')}</td>
-        <td>${cells}</td>
-        <td><button class="check" data-act="toggle-set" data-ex="${i}" data-set="${j}" aria-label="Done">${isPR ? '🏆' : '✓'}</button></td>
-      </tr>`;
+        ${fields.map(([f]) => `<td>${input(f, st, p, j)}</td>`).join('')}
+        <td>${check}</td></tr>`;
+    }
+    const pl = prev[j] && stats.isSidedSet(prev[j]) ? prev[j] : null;
+    const pp = p && stats.isSidedSet(p) ? p : p;
+    const ppR = pp ? { kgR: pp.kgR ?? pp.kg, repsR: pp.repsR ?? pp.reps, secR: pp.secR ?? pp.sec } : null;
+    return `<tr class="${st.done ? 'done' : ''} side-l">
+        <td rowspan="2">${setno}</td>
+        <td class="prev"><span class="lr">L</span>${esc(pl ? stats.sideShort(kind, pl, 'L') : prev[j] ? stats.shortLabel(kind, prev[j]) : '—')}</td>
+        ${fields.map(([f]) => `<td>${input(f, st, pp, j)}</td>`).join('')}
+        <td rowspan="2">${check}</td></tr>
+      <tr class="${st.done ? 'done' : ''} side-r">
+        <td class="prev"><span class="lr">R</span>${esc(pl ? stats.sideShort(kind, pl, 'R') : prev[j] ? stats.shortLabel(kind, prev[j]) : '—')}</td>
+        ${fields.map(([f]) => `<td>${input(f + 'R', st, ppR, j)}</td>`).join('')}</tr>`;
   }).join('');
+
+  const goal = trackStep ? `Goal ${cali.stdLabel(trackStep.std)} to level up` : e.target ? `Target ${e.sets.length} × ${e.target}${kind === 'time' || /s$/.test(e.target) ? '' : ' reps'}${e.sides ? ' each side' : ''}` : '';
 
   return `
     <section class="card ex-card">
       <div class="ex-head">
+        <button class="thumb-btn" data-act="info" data-id="${esc(ex.id)}" aria-label="How to do ${esc(ex.name)}">${thumb(ex, 'thumb sm')}</button>
         <button class="ex-name" data-act="ex-menu" data-ex="${i}">${esc(ex.name)}</button>
         <button class="icon" data-act="ex-menu" data-ex="${i}" aria-label="Exercise options">⋯</button>
       </div>
       <div class="ex-stats small">
+        ${goal ? `<div class="goal">${esc(goal)}</div>` : ''}
         ${prev.length ? `<div><span class="muted">Last</span> ${esc(prev.map((x) => stats.shortLabel(kind, x)).join(' · '))}</div>` : '<div class="muted">First time — no history yet</div>'}
         ${best ? `<div><span class="muted">Best</span> ${esc(stats.bestLabel(kind, best))}</div>` : ''}
+        ${imb ? `<div><span class="muted">L/R</span> ${esc(stats.imbalanceText(imb))}</div>` : ''}
       </div>
-      <table class="sets ${kind}">
+      <table class="sets ${kind} ${e.sides ? 'sided' : ''}">
         <thead><tr><th>Set</th><th>Previous</th>${cols.map((c) => `<th>${c}</th>`).join('')}<th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -237,11 +447,11 @@ async function toggleSet(i, j) {
     for (const inp of row) {
       if (inp.value === '' && inp.placeholder) {
         const f = inp.dataset.field;
-        st[f] = f === 'sec' ? parseTime(inp.placeholder) : parseNum(inp.placeholder);
+        st[f] = f.startsWith('sec') ? parseTime(inp.placeholder) : parseNum(inp.placeholder);
       }
     }
     if (!stats.isValidSet(kind, st)) {
-      const target = [...row].find((x) => x.dataset.field !== 'kg' && !x.value) || row[0];
+      const target = [...row].find((x) => !x.dataset.field.startsWith('kg') && !x.value) || row[0];
       target?.focus();
       return;
     }
@@ -253,26 +463,36 @@ async function toggleSet(i, j) {
   await store.saveDoc(s);
 }
 
-async function finishWorkout() {
-  const s = store.activeSession();
+function cleanSets(s) {
   for (const e of s.exercises) {
     const kind = store.getExercise(e.exerciseId).kind || 'weight';
     e.sets = e.sets.filter((st) => stats.isValidSet(kind, st));
-    e.sets.forEach((st) => { st.done = true; });
   }
   s.exercises = s.exercises.filter((e) => e.sets.length);
+}
+
+async function finishWorkout() {
+  const s = store.activeSession();
+  cleanSets(s);
+  s.exercises.forEach((e) => e.sets.forEach((st) => { st.done = true; }));
   if (!s.exercises.length) {
-    if (confirm('No sets were logged. Discard this workout?')) await store.deleteDoc(s);
+    if (confirm('No sets were logged. Discard this workout?')) { stopRest(); await store.deleteDoc(s); }
     return;
   }
   s.endedAt = new Date().toISOString();
   stopRest();
-  await store.saveDoc(s);
+  await store.saveDoc(s, { render: false });
+  const plan = s.planId && store.getDoc(s.planId);
+  if (plan) {
+    if (plan.date) plan.doneSessionId = s.id;
+    plan.lastUsedAt = s.endedAt;
+    await store.saveDoc(plan, { render: false });
+  }
   store.scheduleSync(500);
   go(`#/session/${encodeURIComponent(s.id)}`);
 }
 
-// ---------------------------------------------------------------- history
+// ================================================================ history
 
 function sessionCard(s) {
   const dur = s.endedAt ? fmtDuration(new Date(s.endedAt) - new Date(s.startedAt)) : 'In progress';
@@ -299,6 +519,19 @@ function viewHistory() {
   return out;
 }
 
+function levelUpBanners(exerciseIds) {
+  const ids = new Set(exerciseIds);
+  return cali.readyTracks().filter((t) => ids.has(cali.currentStep(t.id).exerciseId)).map((t) => {
+    const idx = cali.currentIndex(t.id);
+    const next = t.steps[idx + 1];
+    return `<div class="card levelup">
+      <div>🎉 <strong>${esc(t.name)}:</strong> you hit ${esc(cali.stdLabel(t.steps[idx].std))} on ${esc(t.steps[idx].name)}.
+      ${next ? `Next up: <strong>${esc(next.name)}</strong>.` : 'That was the final step!'}</div>
+      <button class="btn primary small-btn" data-act="level-up" data-track="${t.id}">Level up</button>
+    </div>`;
+  }).join('');
+}
+
 function viewSession(id) {
   const s = store.getDoc(id);
   if (!s) return '<p class="muted pad">Workout not found.</p>';
@@ -312,21 +545,26 @@ function viewSession(id) {
       </div>
       <a class="btn" href="#/session/${encodeURIComponent(s.id)}/edit">Edit</a>
     </div>
+    ${levelUpBanners(s.exercises.map((e) => e.exerciseId))}
     ${prs.size ? `<div class="card pr-banner">🏆 ${prs.size} personal record${prs.size > 1 ? 's' : ''} this workout</div>` : ''}
     ${s.exercises.map((e) => {
-      const kind = store.getExercise(e.exerciseId).kind || 'weight';
+      const ex = store.getExercise(e.exerciseId);
+      const kind = ex.kind || 'weight';
+      const imb = stats.imbalance(kind, e.sets);
       return `
       <section class="card">
-        <a class="ex-name link" href="#/exercise/${encodeURIComponent(e.exerciseId)}">${esc(store.exerciseName(e.exerciseId))} ›</a>
+        <a class="ex-line" href="#/exercise/${encodeURIComponent(e.exerciseId)}">${thumb(ex, 'thumb sm')}<span class="ex-name">${esc(ex.name)} ›</span></a>
         <ol class="set-list">${e.sets.map((st) => `<li>${esc(stats.setLabel(kind, st))}${prs.has(st) ? ' <span class="pr">🏆 PR</span>' : ''}</li>`).join('')}</ol>
+        ${imb ? `<div class="small muted">${esc(stats.imbalanceText(imb))}</div>` : ''}
       </section>`;
     }).join('')}
     ${s.notes ? `<div class="card"><div class="muted small">Notes</div><p class="pre">${esc(s.notes)}</p></div>` : ''}
+    <button class="btn wide" data-act="session-to-plan" data-id="${esc(s.id)}">Save as a plan</button>
     <button class="btn wide danger-text" data-act="delete-session" data-id="${esc(s.id)}">Delete workout</button>
   `;
 }
 
-// ---------------------------------------------------------------- progress
+// ================================================================ progress
 
 let progressQuery = '';
 
@@ -371,12 +609,13 @@ function progressList() {
   }
   return items.map((i) => `
     <a class="card list-row" href="#/exercise/${encodeURIComponent(i.ex.id)}">
-      <div><strong>${esc(i.ex.name)}</strong><div class="muted small">Last: ${esc(daysAgo(i.last))}</div></div>
+      ${thumb(i.ex, 'thumb sm')}
+      <div class="grow"><strong>${esc(i.ex.name)}</strong><div class="muted small">Last: ${esc(daysAgo(i.last))}</div></div>
       <div class="right small">${i.best ? esc(stats.setLabel(i.kind, i.best)) : ''}${i.kind === 'weight' && i.best ? `<div class="muted">1RM ≈ ${fmtNum(stats.score('weight', i.best))}kg</div>` : ''}</div>
     </a>`).join('') || '<p class="muted pad">No matches.</p>';
 }
 
-let metricChoice = {};
+const metricChoice = {};
 
 function viewExercise(id) {
   const ex = store.getExercise(id);
@@ -386,14 +625,16 @@ function viewExercise(id) {
   const metric = metrics.find((m) => m.key === metricChoice[id]) || metrics[0];
   const best = stats.bestSet(kind, hist.flatMap((h) => h.sets));
   const bestSession = best && hist.find((h) => h.sets.includes(best))?.session;
+  const lastSided = hist.slice().reverse().find((h) => h.sets.some(stats.isSidedSet));
+  const imb = lastSided ? stats.imbalance(kind, lastSided.sets) : null;
 
   let hero = '';
   if (best) {
-    const num = kind === 'weight' ? fmtNum(stats.score(kind, best)) : kind === 'reps' ? best.reps : stats.fmtSec(best.sec);
+    const num = kind === 'weight' ? fmtNum(stats.score(kind, best)) : kind === 'reps' ? stats.score(kind, best) : stats.fmtSec(stats.score(kind, best));
     const unit = kind === 'weight' ? 'kg' : kind === 'reps' ? 'reps' : '';
     hero = `
       <div class="hero card">
-        <div class="muted small">${kind === 'weight' ? 'Estimated 1-rep max' : 'Best set'}</div>
+        <div class="muted small">${kind === 'weight' ? 'Estimated 1-rep max' : 'Best set'}${stats.isSidedSet(best) ? ' (weaker side)' : ''}</div>
         <div class="hero-num">${esc(num)}<span>${unit}</span></div>
         <div class="muted small">${kind === 'weight' ? `from ${esc(stats.setLabel(kind, best))} · ` : ''}${bestSession ? esc(fmtDate(bestSession.startedAt, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}</div>
       </div>`;
@@ -402,10 +643,14 @@ function viewExercise(id) {
   const repMax = kind === 'weight' ? stats.repMaxes(hist) : [];
   return `
     <a class="back" href="#/progress">‹ Progress</a>
-    <h1 class="tight">${esc(ex.name)}</h1>
-    <p class="muted small">${esc(ex.category || '')} · ${esc(KINDS[kind])}</p>
+    <div class="ex-title">
+      <button class="thumb-btn" data-act="info" data-id="${esc(id)}">${thumb(ex, 'thumb lg')}</button>
+      <div><h1 class="tight">${esc(ex.name)}</h1>
+      <p class="muted small">${esc(ex.category || '')} · ${esc(KINDS[kind])} · <button class="link-btn inline" data-act="info" data-id="${esc(id)}">How to do it</button></p></div>
+    </div>
     ${hist.length ? `
       ${hero}
+      ${imb ? `<div class="card"><strong>Left vs right</strong><div class="small">${esc(stats.imbalanceText(imb))} <span class="muted">(last time it was tracked)</span></div></div>` : ''}
       <section class="card">
         <div class="seg" role="tablist">
           ${metrics.map((m) => `<button class="${m === metric ? 'on' : ''}" data-act="metric" data-ex="${esc(id)}" data-metric="${m.key}">${m.label}</button>`).join('')}
@@ -418,7 +663,7 @@ function viewExercise(id) {
         <h3>Personal records</h3>
         <table class="pr-table">
           <thead><tr><th>Reps</th><th>Heaviest</th><th>Date</th></tr></thead>
-          <tbody>${repMax.map((r) => `<tr><td>${r.reps}+</td><td>${r.best ? `${fmtNum(r.best.set.kg)}kg × ${r.best.set.reps}` : '<span class="muted">—</span>'}</td><td class="muted">${r.best ? esc(fmtDate(r.best.session.startedAt, { day: 'numeric', month: 'short', year: '2-digit' })) : ''}</td></tr>`).join('')}</tbody>
+          <tbody>${repMax.map((r) => `<tr><td>${r.reps}+</td><td>${r.best ? `${fmtNum(r.best.kg)}kg` : '<span class="muted">—</span>'}</td><td class="muted">${r.best ? esc(fmtDate(r.best.session.startedAt, { day: 'numeric', month: 'short', year: '2-digit' })) : ''}</td></tr>`).join('')}</tbody>
         </table>
       </section>` : ''}
       <h2>History</h2>
@@ -427,7 +672,7 @@ function viewExercise(id) {
           <div><strong>${esc(fmtDate(h.session.startedAt))}</strong><div class="muted small">${esc(h.session.name)}</div></div>
           <div class="right small">${esc(h.sets.map((st) => stats.shortLabel(kind, st)).join(' · '))}</div>
         </a>`).join('')}
-    ` : '<p class="muted pad">No history for this exercise yet.</p>'}
+    ` : `<div class="card center">${visual(ex)}</div><p class="muted pad">No history for this exercise yet.</p>`}
   `;
 }
 
@@ -437,16 +682,113 @@ function drawExerciseChart(id) {
   const kind = store.getExercise(id).kind || 'weight';
   const metrics = stats.METRICS[kind];
   const metric = metrics.find((m) => m.key === metricChoice[id]) || metrics[0];
-  const points = stats.historyFor(id).map((h) => ({
-    t: new Date(h.session.startedAt).getTime(),
-    v: Math.round(metric.fn(h.sets) * 10) / 10,
-    note: h.sets.map((st) => stats.shortLabel(kind, st)).join(' · '),
-  }));
+  const series = stats.chartSeries(id, metric);
+  if (series.length === 1) {
+    for (const p of series[0].points) {
+      const h = stats.historyFor(id).find((x) => x.session.id === p.session.id);
+      p.note = h ? h.sets.map((st) => stats.shortLabel(kind, st)).join(' · ') : '';
+    }
+  }
   const format = metric.unit === 's' ? (v) => stats.fmtSec(v) : (v) => `${fmtNum(v)} ${metric.unit}`;
-  lineChart(el, points, { format });
+  lineChart(el, series, { format });
 }
 
-// ---------------------------------------------------------------- settings
+// ================================================================ calisthenics
+
+function viewCali() {
+  const r = cali.rank();
+  const ready = cali.readyTracks();
+  const focus = new Set(cali.progress().focus || []);
+  const today = cali.todaysSession();
+  const started = Object.keys(cali.progress().levels || {}).length > 0;
+  const group = (g) => cali.TRACKS.filter((t) => t.group === g).map((t) => trackCard(t, focus.has(t.id))).join('');
+  return `
+    <h1>Calisthenics</h1>
+    <section class="card rank tier-${r.tier}">
+      <div class="row between">
+        <div><div class="muted small">Your level</div><div class="rank-name">${esc(r.name)}</div></div>
+        <div class="right"><div class="rank-pts">${r.pts}</div><div class="muted small">points</div></div>
+      </div>
+      <div class="rank-bar"><span style="width:${Math.round(r.pct * 100)}%"></span></div>
+      <div class="rank-ticks">${cali.TIERS.map((n, i) => `<span class="${i <= r.tier ? 'on' : ''}">${esc(n)}</span>`).join('')}</div>
+      <div class="small muted">${r.next ? `${r.next - r.pts} points to ${esc(r.nextName)}. Earn points by levelling up any track.` : 'Top rank reached. Legendary.'}</div>
+    </section>
+
+    ${ready.map((t) => {
+      const idx = cali.currentIndex(t.id);
+      const next = t.steps[idx + 1];
+      return `<div class="card levelup"><div>🎉 <strong>${esc(t.name)}</strong> — ready to move on from ${esc(t.steps[idx].name)}${next ? ` to <strong>${esc(next.name)}</strong>` : ''}.</div>
+        <button class="btn primary small-btn" data-act="level-up" data-track="${t.id}">Level up</button></div>`;
+    }).join('')}
+
+    <section class="card today">
+      <div class="row between"><h3>Today's session</h3><span class="muted small">${today.exercises.length} exercises · about 50 min</span></div>
+      <p class="small muted">Skill work for your focus skills, then paired strength work (pull + squat, dip + hinge, row + push-up) and core — each at your current step.</p>
+      <div class="mini-list">${today.exercises.map((e) => { const ex = store.getExercise(e.exerciseId); return `<span class="mini">${thumb(ex, 'thumb xs')}${esc(ex.name)}</span>`; }).join('')}</div>
+      <div class="row gap two">
+        <button class="btn primary" data-act="start-cali">Start session</button>
+        <button class="btn" data-act="cali-plan">Save as plan</button>
+      </div>
+    </section>
+
+    ${started ? '' : `<div class="card hint"><p><strong>Set your starting point</strong></p><p>Open each track and tap the step you're working on now. Steps before it count as done. After that, the app tells you when a workout meets the goal for your step.</p></div>`}
+
+    <h2>Strength</h2>
+    <div class="tracks">${group('Strength')}</div>
+    <h2>Skills <span class="muted small normal">★ = in today's session</span></h2>
+    <div class="tracks">${group('Skills')}</div>
+    <p class="muted small pad">Built for a pull-up bar, a dip station and the floor. Two dumbbells work as parallettes for L-sits, planche work and deficit push-ups; a Smith machine bar at waist height works for rows.</p>
+  `;
+}
+
+function trackCard(t, isFocus) {
+  const idx = cali.currentIndex(t.id);
+  const done = cali.isComplete(t.id);
+  const step = cali.currentStep(t.id);
+  const ex = store.getExercise(step.exerciseId);
+  const dots = t.steps.map((_, i) => `<i class="${i < idx ? 'd' : i === idx ? 'c' : ''}"></i>`).join('');
+  return `
+    <a class="card track" href="#/track/${t.id}">
+      <div class="track-top">${thumb(ex, 'thumb md')}<span class="tier-chip t${done ? 5 : step.tier}">${esc(done ? 'Complete' : cali.TIERS[step.tier - 1])}</span></div>
+      <strong>${esc(t.name)}${isFocus ? ' <span class="star">★</span>' : ''}</strong>
+      <div class="small">${esc(done ? 'All steps done' : step.name)}</div>
+      <div class="small muted">${done ? '' : esc('Goal ' + cali.stdLabel(step.std))}</div>
+      <div class="dots">${dots}</div>
+    </a>`;
+}
+
+function viewTrack(id) {
+  const t = cali.getTrack(id);
+  if (!t) return '<a class="back" href="#/cali">‹ Calisthenics</a><p class="muted pad">Track not found.</p>';
+  const idx = cali.currentIndex(id);
+  const focus = (cali.progress().focus || []).includes(id);
+  const rd = cali.readiness(id);
+  return `
+    <a class="back" href="#/cali">‹ Calisthenics</a>
+    <h1 class="tight">${esc(t.name)}</h1>
+    <p class="muted">${esc(t.blurb)}</p>
+    ${t.group === 'Skills' ? `<button class="btn ${focus ? 'primary' : ''}" data-act="focus" data-track="${id}">${focus ? '★ In today\'s session' : '☆ Add to today\'s session'}</button>` : ''}
+    ${rd && !cali.isComplete(id) ? `<div class="card ${rd.ready ? 'levelup' : ''}"><div class="small">${rd.ready ? '🎉 Your last workout met the goal.' : `Last time: ${rd.good} of ${rd.need} sets met the goal.`}</div>${rd.ready ? `<button class="btn primary small-btn" data-act="level-up" data-track="${id}">Level up</button>` : ''}</div>` : ''}
+    <ol class="steps-list">
+      ${t.steps.map((s, i) => {
+        const ex = store.getExercise(s.exerciseId);
+        const state = i < idx ? 'done' : i === idx ? 'current' : 'todo';
+        return `<li class="step ${state}">
+          <button class="step-btn" data-act="step-menu" data-track="${id}" data-i="${i}">
+            <span class="step-state">${state === 'done' ? '✓' : state === 'current' ? '▶' : i + 1}</span>
+            ${thumb(ex, 'thumb sm')}
+            <span class="grow"><strong>${esc(s.name)}</strong><span class="small muted block">Goal ${esc(cali.stdLabel(s.std))}${ex.sided ? ' each side' : ''}</span>
+            ${state === 'current' && s.tip ? `<span class="small block tip">${esc(s.tip)}</span>` : ''}</span>
+            <span class="tier-chip t${s.tier}">${esc(cali.TIERS[s.tier - 1])}</span>
+          </button>
+        </li>`;
+      }).join('')}
+    </ol>
+    <p class="muted small">Tap a step to set it as your current one, see how to do it, or view your progress.</p>
+  `;
+}
+
+// ================================================================ settings
 
 function viewSettings() {
   const st = store.state.settings;
@@ -454,7 +796,6 @@ function viewSettings() {
   const sy = store.state.sync;
   return `
     <h1>Settings</h1>
-
     <section class="card">
       <h3>Rest timer</h3>
       <label class="field">Default rest
@@ -490,10 +831,9 @@ function viewSettings() {
         <button class="btn" data-act="export">Export JSON</button>
         <label class="btn">Import JSON<input type="file" accept="application/json,.json" id="import-file" hidden></label>
       </div>
-      <p class="muted small" id="storage-msg"></p>
     </section>
 
-    <p class="muted small center">Lift Tracker · data stays on this phone and in your own GitHub repo.</p>
+    <p class="muted small center">Lift Tracker · data stays on this phone and in your own GitHub repo.<br>Exercise photos: free-exercise-db (public domain).</p>
   `;
 }
 
@@ -529,10 +869,7 @@ async function importData(file) {
     for (const doc of docs) {
       if (!doc?.id || !doc.type) continue;
       const cur = store.state.records.get(doc.id);
-      if (!cur || (doc.updatedAt || '') > (cur.doc.updatedAt || '')) {
-        await store.saveDoc(doc, { render: false });
-        n++;
-      }
+      if (!cur || (doc.updatedAt || '') > (cur.doc.updatedAt || '')) { await store.saveDoc(doc, { render: false }); n++; }
     }
     store.emit();
     alert(`Imported ${n} item(s).`);
@@ -541,74 +878,75 @@ async function importData(file) {
   }
 }
 
-// ---------------------------------------------------------------- modals
+// ================================================================ exercise picker
 
-function closeModal() {
-  modal.innerHTML = '';
-  modal.hidden = true;
-  document.body.classList.remove('modal-open');
+// mode: {type:'add'} | {type:'replace', index} | {type:'plan-add', planId} | {type:'plan-replace', planId, index}
+let pick = { mode: null, query: '', cat: 'All' };
+
+function suggestFor(mode) {
+  if (mode.type.startsWith('plan')) {
+    const p = store.getDoc(mode.planId);
+    if (p?.dayId && gen.DAY_PATTERNS[p.dayId]) return { label: `Suggested for ${p.name}`, list: gen.suggestions(p.dayId, p.style || 'mixed') };
+  }
+  return null;
 }
-
-function openModal(html) {
-  modal.innerHTML = `<div class="backdrop" data-act="close-modal"></div><div class="sheet">${html}</div>`;
-  modal.hidden = false;
-  document.body.classList.add('modal-open');
-}
-
-let sheetActions = [];
-function actionSheet(title, actions) {
-  sheetActions = actions;
-  openModal(`
-    <div class="sheet-title">${esc(title)}</div>
-    ${actions.map((a, k) => `<button class="sheet-btn ${a.danger ? 'danger-text' : ''}" data-act="sheet-action" data-k="${k}">${esc(a.label)}</button>`).join('')}
-    <button class="sheet-btn cancel" data-act="close-modal">Cancel</button>`);
-}
-
-// Exercise picker. mode: { type: 'add' } | { type: 'replace', index }
-let pickMode = null;
-let pickQuery = '';
 
 function openPicker(mode) {
-  pickMode = mode;
-  pickQuery = '';
+  pick = { mode, query: '', cat: 'All' };
+  renderPicker();
+}
+
+function renderPicker() {
   openModal(`
     <div class="picker-head">
-      <input id="pick-q" type="search" placeholder="Search exercises" autocomplete="off" autocorrect="off" enterkeyhint="search">
+      <input id="pick-q" type="search" placeholder="Search ${store.exercises().length} exercises" autocomplete="off" autocorrect="off" enterkeyhint="search" value="${esc(pick.query)}">
       <button class="link-btn" data-act="close-modal">Cancel</button>
     </div>
-    <div class="picker-list" id="pick-list">${pickerList()}</div>`);
-  setTimeout(() => document.getElementById('pick-q')?.focus(), 50);
+    <div class="cat-chips">${['All', ...CATEGORIES.filter((c) => c !== 'Other')].map((c) => `<button class="chip-btn ${pick.cat === c ? 'on' : ''}" data-act="pick-cat" data-cat="${c}">${esc(c)}</button>`).join('')}</div>
+    <div class="picker-list" id="pick-list">${pickerList()}</div>`, { cls: 'picker' });
+  if (!pick.query) setTimeout(() => { if (!('ontouchstart' in window)) document.getElementById('pick-q')?.focus(); }, 50);
 }
 
 function recentExerciseIds() {
   const seen = [];
   for (const s of store.finishedSessions()) for (const e of s.exercises) if (!seen.includes(e.exerciseId)) seen.push(e.exerciseId);
-  return seen.slice(0, 12);
+  return seen.slice(0, 10);
+}
+
+function pickRow(ex) {
+  const sub = [ex.category, ex.level ? cali.TIERS[ex.level - 1] : '', ex.sided ? 'one side' : ''].filter(Boolean).join(' · ');
+  return `
+    <div class="pick-row">
+      <button class="pick-main" data-act="pick" data-id="${esc(ex.id)}">${thumb(ex, 'thumb sm')}<span class="grow"><span class="pick-name">${esc(ex.name)}</span><span class="small muted block">${esc(sub)}</span></span></button>
+      <button class="icon info-btn" data-act="pick-info" data-id="${esc(ex.id)}" aria-label="How to do ${esc(ex.name)}">ⓘ</button>
+    </div>`;
 }
 
 function pickerList() {
-  const all = store.exercises();
-  const row = (ex) => `
-    <button class="pick-row" data-act="pick" data-id="${esc(ex.id)}">
-      <span>${esc(ex.name)}</span><span class="muted small">${esc(ex.category || '')}</span>
-    </button>`;
-  if (!pickQuery.trim()) {
-    const recent = recentExerciseIds().map((id) => all.find((e) => e.id === id)).filter(Boolean);
-    let html = recent.length ? `<div class="pick-group">Recent</div>${recent.map(row).join('')}` : '';
-    for (const c of CATEGORIES) {
-      const items = all.filter((e) => (e.category || 'Other') === c);
-      if (items.length) html += `<div class="pick-group">${esc(c)}</div>${items.map(row).join('')}`;
-    }
+  let all = store.exercises();
+  if (pick.cat !== 'All') all = all.filter((e) => (e.category || 'Other') === pick.cat);
+  const q = pick.query.trim();
+  if (!q) {
+    let html = '';
+    const sug = pick.cat === 'All' && suggestFor(pick.mode);
+    if (sug) html += `<div class="pick-group">${esc(sug.label)}</div>${sug.list.slice(0, 40).map(pickRow).join('')}`;
+    const recent = pick.cat === 'All' ? recentExerciseIds().map((id) => all.find((e) => e.id === id)).filter(Boolean) : [];
+    if (recent.length && !sug) html += `<div class="pick-group">Recent</div>${recent.map(pickRow).join('')}`;
+    if (!sug || pick.cat !== 'All') {
+      for (const c of CATEGORIES) {
+        const items = all.filter((e) => (e.category || 'Other') === c);
+        if (items.length) html += `<div class="pick-group">${esc(c)}</div>${items.map(pickRow).join('')}`;
+      }
+    } else html += '<div class="pick-group">Search above or pick a category for everything else</div>';
     return html;
   }
-  const results = searchExercises(all, pickQuery);
-  const exact = results.some((e) => e.name.toLowerCase() === pickQuery.trim().toLowerCase());
-  return results.map(row).join('') +
-    (exact ? '' : `<button class="pick-row create" data-act="create-ex">+ Create “${esc(pickQuery.trim())}”</button>`);
+  const results = searchExercises(all, q);
+  const exact = results.some((e) => e.name.toLowerCase() === q.toLowerCase());
+  return results.map(pickRow).join('') + (exact ? '' : `<button class="pick-row create" data-act="create-ex">+ Create “${esc(q)}”</button>`);
 }
 
 function openCreateForm() {
-  const name = pickQuery.trim();
+  const name = pick.query.trim();
   const sheet = modal.querySelector('.sheet');
   sheet.innerHTML = `
     <div class="sheet-title">New exercise</div>
@@ -620,27 +958,41 @@ function openCreateForm() {
       <label class="field">Muscle group
         <select name="category">${CATEGORIES.map((c) => `<option>${esc(c)}</option>`).join('')}</select>
       </label>
+      <label class="check-field"><input type="checkbox" name="sided"> One side at a time (log left and right)</label>
       <div class="row gap"><button class="btn primary" type="submit">Create</button><button class="btn" type="button" data-act="close-modal">Cancel</button></div>
     </form>`;
 }
 
 async function pickExercise(id) {
   closeModal();
-  if (pickMode?.type === 'browse') return go(`#/exercise/${encodeURIComponent(id)}`);
+  const m = pick.mode || { type: 'add' };
+  if (m.type.startsWith('plan')) {
+    const p = store.getDoc(m.planId);
+    if (!p) return;
+    const ex = store.getExercise(id);
+    const item = { exerciseId: id, sets: 3, target: ex.kind === 'time' ? '30s' : ex.level >= 3 ? '5–8' : '8–12', sides: defaultSides(id) || undefined };
+    if (m.type === 'plan-replace') p.exercises[m.index] = { ...p.exercises[m.index], ...item, track: undefined };
+    else p.exercises.push(item);
+    await store.saveDoc(p);
+    if (m.type === 'plan-add') toast(`Added ${ex.name}`);
+    return;
+  }
   const s = editingSession();
   if (!s) return;
-  if (pickMode?.type === 'replace') {
-    s.exercises[pickMode.index].exerciseId = id;
+  if (m.type === 'replace') {
+    s.exercises[m.index].exerciseId = id;
+    s.exercises[m.index].sides = defaultSides(id);
+    s.exercises[m.index].track = undefined;
   } else {
     const prev = stats.historyFor(id, { excludeId: s.id });
     const n = prev.length ? Math.min(prev[prev.length - 1].sets.length, 6) : 3;
-    s.exercises.push({ exerciseId: id, sets: Array.from({ length: n }, blankSet) });
+    s.exercises.push(sessionExercise(id, n));
   }
   await store.saveDoc(s);
-  if (pickMode?.type !== 'replace') setTimeout(() => main.querySelectorAll('.ex-card').item(s.exercises.length - 1)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  if (m.type !== 'replace') setTimeout(() => main.querySelectorAll('.ex-card').item(s.exercises.length - 1)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
 }
 
-// ---------------------------------------------------------------- rest timer
+// ================================================================ rest timer
 
 let rest = null; // { endAt, total, finishedAt }
 let audioCtx = null;
@@ -709,123 +1061,192 @@ function tick() {
     el.textContent = h ? `${h}:${fmtClock(sec % 3600).padStart(5, '0')}` : fmtClock(sec);
   }
   if (rest) {
-    if (!rest.finishedAt && Date.now() >= rest.endAt) {
-      rest.finishedAt = Date.now();
-      beep();
-    }
+    if (!rest.finishedAt && Date.now() >= rest.endAt) { rest.finishedAt = Date.now(); beep(); }
     if (rest.finishedAt && Date.now() - rest.finishedAt > 8000) stopRest();
     else renderRest();
   }
 }
 setInterval(tick, 500);
 
-// ---------------------------------------------------------------- events
+// ================================================================ actions
 
-document.addEventListener('click', async (evt) => {
+const ACTIONS = {
+  'start-day': (el) => startDay(el.dataset.day),
+  'start-empty': () => newSession('Workout', {}, []),
+  'start-cali': () => startCali(),
+  'start-plan': (el) => startPlan(el.dataset.id),
+  'pick-day': (el) => { selectedDay = el.dataset.day; renderMain(); },
+  wizard: (el) => openWizard(el.dataset.mode, el.dataset.date),
+  'wiz-set': (el) => { wiz[el.dataset.field] = el.dataset.val; const d = document.getElementById('wiz-date')?.value; if (d !== undefined) wiz.date = d || null; renderWizard(); },
+  'wiz-nodate': () => { wiz.date = null; renderWizard(); },
+  'wiz-create': () => createFromWizard(),
+
+  rename: async () => {
+    const s = editingSession();
+    const name = prompt('Workout name', s.name);
+    if (name && name.trim()) { s.name = name.trim(); await store.saveDoc(s); }
+  },
+  finish: async () => { if (confirm('Finish this workout?')) await finishWorkout(); },
+  'edit-done': async () => {
+    const s = editingSession();
+    cleanSets(s);
+    await store.saveDoc(s, { render: false });
+    go(`#/session/${encodeURIComponent(s.id)}`);
+  },
+  discard: async () => {
+    if (confirm('Discard this workout? Nothing will be saved.')) { stopRest(); await store.deleteDoc(store.activeSession()); }
+  },
+  'toggle-set': (el) => toggleSet(+el.dataset.ex, +el.dataset.set),
+  'add-set': (el) => {
+    const s = editingSession();
+    const sets = s.exercises[+el.dataset.ex].sets;
+    const last = sets[sets.length - 1];
+    sets.push(last ? { kg: last.kg, reps: last.reps, sec: last.sec, kgR: last.kgR, repsR: last.repsR, secR: last.secR, done: false } : blankSet());
+    return store.saveDoc(s);
+  },
+  'set-menu': (el) => {
+    const s = editingSession();
+    const i = +el.dataset.ex, j = +el.dataset.set;
+    actionSheet(`Set ${j + 1}`, [{ label: 'Delete set', danger: true, run: async () => { s.exercises[i].sets.splice(j, 1); await store.saveDoc(s); } }]);
+  },
+  'ex-menu': (el) => {
+    const s = editingSession();
+    const i = +el.dataset.ex;
+    const e = s.exercises[i];
+    const move = (d) => async () => { const [x] = s.exercises.splice(i, 1); s.exercises.splice(i + d, 0, x); await store.saveDoc(s); };
+    const acts = [{ label: 'How to do it', run: () => openInfo(e.exerciseId) }];
+    acts.push({ label: e.sides ? 'Log both sides together' : 'Log left & right separately', run: async () => { e.sides = !e.sides; await store.saveDoc(s); } });
+    if (i > 0) acts.push({ label: 'Move up', run: move(-1) });
+    if (i < s.exercises.length - 1) acts.push({ label: 'Move down', run: move(1) });
+    acts.push({ label: 'Swap exercise', run: () => openPicker({ type: 'replace', index: i }) });
+    acts.push({ label: 'View progress', run: () => go(`#/exercise/${encodeURIComponent(e.exerciseId)}`) });
+    acts.push({ label: 'Remove exercise', danger: true, run: async () => { s.exercises.splice(i, 1); await store.saveDoc(s); } });
+    actionSheet(store.exerciseName(e.exerciseId), acts);
+  },
+  'sheet-action': (el) => runSheetAction(+el.dataset.k),
+  'add-ex': () => openPicker({ type: 'add' }),
+  'close-modal': () => closeModal(),
+  pick: (el) => pickExercise(el.dataset.id),
+  'pick-cat': (el) => { pick.cat = el.dataset.cat; document.querySelectorAll('.chip-btn').forEach((b) => b.classList.toggle('on', b.dataset.cat === pick.cat)); document.getElementById('pick-list').innerHTML = pickerList(); document.getElementById('pick-list').scrollTop = 0; },
+  'pick-info': async (el) => { modal.querySelector('.sheet').innerHTML = await infoHTML(el.dataset.id, { back: true, addable: true }); modal.querySelector('.sheet').scrollTop = 0; },
+  'picker-back': () => renderPicker(),
+  info: (el) => openInfo(el.dataset.id),
+  'create-ex': () => openCreateForm(),
+  'delete-session': async (el) => {
+    if (!confirm('Delete this workout permanently?')) return;
+    await store.deleteDoc(store.getDoc(el.dataset.id));
+    go('#/history');
+  },
+  'session-to-plan': async (el) => {
+    const s = store.getDoc(el.dataset.id);
+    const plan = { id: 'pl-' + uid(), type: 'plan', name: s.name, dayId: null, style: null, date: null, createdAt: new Date().toISOString(),
+      exercises: s.exercises.map((e) => ({ exerciseId: e.exerciseId, sets: e.sets.length, target: e.target || '', sides: e.sides || undefined, track: e.track })) };
+    await store.saveDoc(plan, { render: false });
+    go(`#/plan/${encodeURIComponent(plan.id)}`);
+    toast('Plan created — give it a date if you like');
+  },
+  metric: (el) => { metricChoice[el.dataset.ex] = el.dataset.metric; renderMain(); },
+
+  // plans
+  'plan-add': () => openPicker({ type: 'plan-add', planId: route().id }),
+  'plan-nodate': async () => { const p = editingPlan(); p.date = null; await store.saveDoc(p); },
+  'plan-sets': async (el) => { const p = editingPlan(); const e = p.exercises[+el.dataset.i]; e.sets = Math.max(1, Math.min(10, (e.sets || 3) + +el.dataset.d)); await store.saveDoc(p); },
+  'plan-shuffle': async (el) => {
+    const p = editingPlan();
+    const i = +el.dataset.i;
+    const cur = p.exercises[i];
+    const ex = store.getExercise(cur.exerciseId);
+    const exclude = new Set(p.exercises.map((e) => e.exerciseId));
+    const style = p.style === 'mixed' ? (isCalisthenics(ex) ? 'calisthenics' : 'conventional') : p.style || 'mixed';
+    const list = gen.candidates(cur.pattern || ex.pattern, style, { exclude });
+    if (!list.length) return toast('No other options for this slot');
+    const next = list[Math.floor(Math.random() * list.length)];
+    p.exercises[i] = { ...cur, exerciseId: next.id, track: undefined, sides: next.sided || undefined, pattern: cur.pattern || ex.pattern };
+    await store.saveDoc(p);
+  },
+  'plan-menu': (el) => {
+    const p = editingPlan();
+    const i = +el.dataset.i;
+    const e = p.exercises[i];
+    const move = (d) => async () => { const [x] = p.exercises.splice(i, 1); p.exercises.splice(i + d, 0, x); await store.saveDoc(p); };
+    const acts = [{ label: 'How to do it', run: () => openInfo(e.exerciseId) }];
+    acts.push({ label: e.sides ? 'Log both sides together' : 'Log left & right separately', run: async () => { e.sides = !e.sides || undefined; await store.saveDoc(p); } });
+    if (i > 0) acts.push({ label: 'Move up', run: move(-1) });
+    if (i < p.exercises.length - 1) acts.push({ label: 'Move down', run: move(1) });
+    acts.push({ label: 'Swap exercise', run: () => openPicker({ type: 'plan-replace', planId: p.id, index: i }) });
+    acts.push({ label: 'Remove', danger: true, run: async () => { p.exercises.splice(i, 1); await store.saveDoc(p); } });
+    actionSheet(store.exerciseName(e.exerciseId), acts);
+  },
+  'plan-regen': async () => {
+    const p = editingPlan();
+    p.exercises = gen.generate({ dayType: p.dayId, style: p.style, length: p.exercises.length <= 4 ? 'short' : p.exercises.length >= 8 ? 'long' : 'normal' });
+    await store.saveDoc(p);
+  },
+  'plan-save': () => { const p = editingPlan(); toast(p.date ? `Saved for ${dayLabel(p.date)}` : 'Saved to your plans'); if (p.date) selectedDay = p.date; go('#/workout'); },
+  'plan-delete': async () => {
+    if (!confirm('Delete this plan?')) return;
+    await store.deleteDoc(editingPlan());
+    go('#/workout');
+  },
+
+  // calisthenics
+  'level-up': async (el) => {
+    const t = cali.getTrack(el.dataset.track);
+    const before = cali.rank().tier;
+    await cali.setLevel(t.id, cali.currentIndex(t.id) + 1);
+    const r = cali.rank();
+    toast(r.tier > before ? `New rank: ${r.name}! 🎉` : `${t.name}: levelled up (+${t.steps[cali.currentIndex(t.id) - 1]?.tier || 1} pts)`);
+  },
+  focus: (el) => cali.toggleFocus(el.dataset.track),
+  'cali-plan': async () => {
+    const s = cali.todaysSession();
+    const plan = { id: 'pl-' + uid(), type: 'plan', name: s.name, dayId: 'full', style: 'calisthenics', date: localDate(), createdAt: new Date().toISOString(), exercises: s.exercises };
+    await store.saveDoc(plan, { render: false });
+    go(`#/plan/${encodeURIComponent(plan.id)}`);
+  },
+  'step-menu': (el) => {
+    const t = cali.getTrack(el.dataset.track);
+    const i = +el.dataset.i;
+    const s = t.steps[i];
+    actionSheet(s.name, [
+      { label: 'This is my current step', run: () => cali.setLevel(t.id, i) },
+      { label: 'I can already do this (mark done)', run: () => cali.setLevel(t.id, i + 1) },
+      { label: 'How to do it', run: () => openInfo(s.exerciseId) },
+      { label: 'View progress', run: () => go(`#/exercise/${encodeURIComponent(s.exerciseId)}`) },
+    ]);
+  },
+
+  // rest timer
+  'rest-adj': (el) => {
+    if (!rest) return;
+    const d = +el.dataset.d;
+    if (rest.finishedAt) { if (d > 0) startRest(d); return; }
+    rest.endAt += d * 1000;
+    rest.total = Math.max(1, rest.total + d);
+    renderRest();
+  },
+  'rest-skip': () => stopRest(),
+  'sync-now': () => sync(),
+  export: () => exportData(),
+};
+
+document.addEventListener('click', (evt) => {
   const el = evt.target.closest('[data-act]');
-  if (!el) return;
-  const act = el.dataset.act;
-  const i = el.dataset.ex != null ? +el.dataset.ex : null;
-  const j = el.dataset.set != null ? +el.dataset.set : null;
-
-  switch (act) {
-    case 'start-day': {
-      if (store.activeSession()) return go('#/workout');
-      return startDay(el.dataset.day);
-    }
-    case 'start-empty': return newSession('Workout', null, []);
-    case 'rename': {
-      const s = editingSession();
-      const name = prompt('Workout name', s.name);
-      if (name && name.trim()) { s.name = name.trim(); await store.saveDoc(s); }
-      return;
-    }
-    case 'finish': {
-      if (confirm('Finish this workout?')) await finishWorkout();
-      return;
-    }
-    case 'edit-done': {
-      const s = editingSession();
-      for (const e of s.exercises) {
-        const kind = store.getExercise(e.exerciseId).kind || 'weight';
-        e.sets = e.sets.filter((st) => stats.isValidSet(kind, st));
-      }
-      s.exercises = s.exercises.filter((e) => e.sets.length);
-      await store.saveDoc(s, { render: false });
-      return go(`#/session/${encodeURIComponent(s.id)}`);
-    }
-    case 'discard': {
-      if (confirm('Discard this workout? Nothing will be saved.')) { stopRest(); await store.deleteDoc(store.activeSession()); }
-      return;
-    }
-    case 'toggle-set': return toggleSet(i, j);
-    case 'add-set': {
-      const s = editingSession();
-      const sets = s.exercises[i].sets;
-      const last = sets[sets.length - 1];
-      sets.push(last ? { kg: last.kg, reps: last.reps, sec: last.sec, done: false } : blankSet());
-      return store.saveDoc(s);
-    }
-    case 'set-menu': {
-      const s = editingSession();
-      return actionSheet(`Set ${j + 1}`, [
-        { label: 'Delete set', danger: true, run: async () => { s.exercises[i].sets.splice(j, 1); await store.saveDoc(s); } },
-      ]);
-    }
-    case 'ex-menu': {
-      const s = editingSession();
-      const e = s.exercises[i];
-      const move = (d) => async () => { const [x] = s.exercises.splice(i, 1); s.exercises.splice(i + d, 0, x); await store.saveDoc(s); };
-      const acts = [];
-      if (i > 0) acts.push({ label: 'Move up', run: move(-1) });
-      if (i < s.exercises.length - 1) acts.push({ label: 'Move down', run: move(1) });
-      acts.push({ label: 'Swap exercise', run: () => openPicker({ type: 'replace', index: i }) });
-      acts.push({ label: 'View progress', run: () => go(`#/exercise/${encodeURIComponent(e.exerciseId)}`) });
-      acts.push({ label: 'Remove exercise', danger: true, run: async () => { s.exercises.splice(i, 1); await store.saveDoc(s); } });
-      return actionSheet(store.exerciseName(e.exerciseId), acts);
-    }
-    case 'sheet-action': {
-      const a = sheetActions[+el.dataset.k];
-      closeModal();
-      return a?.run();
-    }
-    case 'add-ex': return openPicker({ type: 'add' });
-    case 'close-modal': return closeModal();
-    case 'pick': return pickExercise(el.dataset.id);
-    case 'create-ex': return openCreateForm();
-    case 'delete-session': {
-      if (!confirm('Delete this workout permanently?')) return;
-      await store.deleteDoc(store.getDoc(el.dataset.id));
-      return go('#/history');
-    }
-    case 'metric': {
-      metricChoice[el.dataset.ex] = el.dataset.metric;
-      return renderMain();
-    }
-    case 'rest-adj': {
-      if (!rest) return;
-      const d = +el.dataset.d;
-      if (rest.finishedAt) { if (d > 0) startRest(d); return; }
-      rest.endAt += d * 1000;
-      rest.total = Math.max(1, rest.total + d);
-      return renderRest();
-    }
-    case 'rest-skip': return stopRest();
-    case 'sync-now': return sync();
-    case 'export': return exportData();
-  }
+  if (!el || el.disabled) return;
+  const fn = ACTIONS[el.dataset.act];
+  if (fn) { evt.preventDefault(); fn(el, evt); }
 });
 
 document.addEventListener('input', async (evt) => {
   const el = evt.target;
-  if (el.id === 'pick-q') {
-    pickQuery = el.value;
-    document.getElementById('pick-list').innerHTML = pickerList();
-    return;
-  }
-  if (el.id === 'progress-q') {
-    progressQuery = el.value;
-    document.getElementById('progress-list').innerHTML = progressList();
+  if (el.id === 'pick-q') { pick.query = el.value; document.getElementById('pick-list').innerHTML = pickerList(); return; }
+  if (el.id === 'progress-q') { progressQuery = el.value; document.getElementById('progress-list').innerHTML = progressList(); return; }
+  if (el.dataset.planField === 'name' || el.dataset.planTarget != null) {
+    const p = editingPlan();
+    if (!p) return;
+    if (el.dataset.planField === 'name') p.name = el.value;
+    else p.exercises[+el.dataset.planTarget].target = el.value.trim();
+    await store.saveDoc(p, { render: false });
     return;
   }
   const field = el.dataset.field;
@@ -835,13 +1256,13 @@ document.addEventListener('input', async (evt) => {
   if (field === 'notes') s.notes = el.value;
   else {
     const st = s.exercises[+el.dataset.ex].sets[+el.dataset.set];
-    st[field] = field === 'sec' ? parseTime(el.value) : parseNum(el.value);
+    st[field] = field.startsWith('sec') ? parseTime(el.value) : parseNum(el.value);
   }
   await store.saveDoc(s, { render: false });
   renderHeader();
 });
 
-// Move to the next input when "done" is pressed on the keyboard.
+// Move to the next input when "next" is pressed on the keyboard.
 document.addEventListener('keydown', (evt) => {
   if (evt.key !== 'Enter' || !evt.target.dataset?.field || evt.target.tagName === 'TEXTAREA') return;
   evt.preventDefault();
@@ -854,6 +1275,8 @@ document.addEventListener('change', async (evt) => {
   const el = evt.target;
   if (el.dataset.setting === 'restSeconds') await store.saveSettings({ restSeconds: +el.value });
   if (el.id === 'import-file' && el.files[0]) await importData(el.files[0]);
+  if (el.dataset.planField === 'date') { const p = editingPlan(); p.date = el.value || null; await store.saveDoc(p); }
+  if (el.id === 'wiz-date') wiz.date = el.value || null;
 });
 
 document.addEventListener('submit', async (evt) => {
@@ -864,13 +1287,13 @@ document.addEventListener('submit', async (evt) => {
     const f = new FormData(form);
     const name = String(f.get('name')).trim();
     if (!name) return;
-    const doc = { id: 'x-' + uid(), type: 'exercise', name, kind: f.get('kind'), category: f.get('category') };
+    const doc = { id: 'x-' + uid(), type: 'exercise', name, kind: f.get('kind'), category: f.get('category'), sided: !!f.get('sided'), uni: !!f.get('sided') };
     await store.saveDoc(doc, { render: false });
     await pickExercise(doc.id);
   }
 });
 
-// ---------------------------------------------------------------- boot
+// ================================================================ boot
 
 async function boot() {
   await store.init();

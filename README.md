@@ -2,7 +2,11 @@
 
 A gym log that runs as a home-screen app on iPhone. No App Store, no developer account, no subscription.
 
-- Push / Pull / Legs / Abs & Stretch days, picked when you start
+- **300 exercises** with photos or diagrams, step-by-step instructions and a YouTube demo link; search is forgiving ("push ups", "single arm tricep", "lat pull down")
+- **Left / right logging** for one-arm and one-leg work, with an imbalance readout and separate Left/Right progress lines
+- **Plan ahead:** a 7-day strip on the Workout tab; **Create for me** (rule-based generator) or **Build my own**, by type (Push, Pull, Legs, Core & Abs, Stretch, Full body) and style (Conventional, Calisthenics, Mixed); save for any day
+- **Calisthenics tab:** 15 progression tracks (pull-up, dips, rows, push-up, squat, hinge, core, leg raise, muscle-up, L-sit, handstand, HSPU, front lever, back lever, planche), automatic "ready to level up" detection, and a Beginner → Elite rank
+- Quick-start Push / Pull / Legs / Abs & Stretch days that copy what you did last time
 - Each exercise shows **last time** and your **all-time best**; tick a set to start the rest timer
 - Progress charts (estimated 1RM, heaviest, volume), rep-max PRs, 🏆 badges for new records
 - Works offline; data is saved on the phone first, then synced to **your own private GitHub repo** as JSON
@@ -49,7 +53,7 @@ They open the same URL, add it to their home screen, and point Settings at **the
 - Every change is saved in the phone's IndexedDB immediately, so logging never waits on the network.
 - Sync runs when the app opens, when it comes back to the foreground, a few seconds after changes, and from **Sync now**.
 - Each sync pulls changed files, then pushes all local changes as **one commit**. If the same workout was edited on two devices, the newer edit wins.
-- Repo layout: `data/sessions/<date>-<id>.json` (one file per workout) and `data/exercises/<id>.json` (custom exercises). They are readable JSON that you can edit or analyse.
+- Repo layout: `data/sessions/<date>-<id>.json` (one file per workout), `data/exercises/<id>.json` (custom exercises), `data/plans/<id>.json` (planned workouts) and `data/calisthenics/cali-progress.json` (track levels). They are readable JSON that you can edit or analyse.
 - **Settings → Export JSON** gives you a full backup file at any time.
 
 ## iPhone limitations
@@ -68,10 +72,19 @@ js/app.js        UI, routing, rest timer
 js/store.js      in-memory state + IndexedDB persistence
 js/db.js         IndexedDB wrapper
 js/sync.js       GitHub sync (Git Data API)
-js/exercises.js  built-in exercises, day templates, search
+js/catalog.js    the built-in exercise list (add exercises here)
+js/exercises.js  day templates, search
+js/cali.js       calisthenics tracks, standards, ranks
+js/generator.js  "Create for me" workout builder
+js/poses.js      stick-figure diagrams for skills without photos
+js/ui.js         shared sheets, thumbnails, exercise info
+img/ex/          exercise photos + instructions
 js/stats.js      bests, PRs, chart metrics
 js/chart.js      SVG line chart
 sw.js            offline cache
 ```
 
 To run locally, run `python3 -m http.server` and open <http://localhost:8000>.
+
+## Credits
+Exercise photos and instructions come from [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (public domain / Unlicense). Calisthenics progressions follow the r/bodyweightfitness Recommended Routine and the Overcoming Gravity skill ladders.

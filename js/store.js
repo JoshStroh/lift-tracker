@@ -97,8 +97,10 @@ export function exercises() {
   return [...BUILTIN_EXERCISES, ...custom].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+const BUILTIN_BY_ID = new Map(BUILTIN_EXERCISES.map((e) => [e.id, e]));
+
 export function getExercise(id) {
-  return BUILTIN_EXERCISES.find((e) => e.id === id) || getDoc(id) || { id, name: 'Unknown exercise', kind: 'weight', category: 'Other' };
+  return BUILTIN_BY_ID.get(id) || getDoc(id) || { id, name: 'Unknown exercise', kind: 'weight', category: 'Other', photo: '' };
 }
 
 export const exerciseName = (id) => getExercise(id).name;

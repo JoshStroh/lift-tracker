@@ -1,20 +1,23 @@
-// Small dependency-free SVG line chart (single series) with tap/hover readout.
+// Small dependency-free SVG line chart with a tap/hover readout.
+// series: [{ name, points: [{ t, v, note? }] }] — one series, or Left/Right.
 import { esc, fmtNum, fmtDate } from './util.js';
 
-export function lineChart(container, points, { unit = '', format = (v) => fmtNum(v) + unit } = {}) {
+export function lineChart(container, series, { format = (v) => fmtNum(v) } = {}) {
+  series = series.filter((s) => s.points.length);
   const W = Math.max(280, container.clientWidth || 320);
   const H = 200;
   const m = { t: 16, r: 14, b: 26, l: 40 };
   const iw = W - m.l - m.r;
   const ih = H - m.t - m.b;
 
-  if (!points.length) {
+  if (!series.length) {
     container.innerHTML = '<p class="muted center pad">No data yet.</p>';
     return;
   }
 
-  const xs = points.map((p) => p.t);
-  const ys = points.map((p) => p.v);
+  const all = series.flatMap((s) => s.points);
+  const xs = all.map((p) => p.t);
+  const ys = all.map((p) => p.v);
   let x0 = Math.min(...xs), x1 = Math.max(...xs);
   if (x0 === x1) { x0 -= 86400000; x1 += 86400000; }
   let y0 = Math.min(...ys), y1 = Math.max(...ys);
@@ -30,45 +33,57 @@ export function lineChart(container, points, { unit = '', format = (v) => fmtNum
     <line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}"/>
     <text class="axis" x="${m.l - 6}" y="${Y(v) + 4}" text-anchor="end">${esc(fmtNum(v))}</text>`).join('');
 
-  const xLabels = [points[0], points[points.length - 1]]
-    .filter((p, i, a) => i === 0 || p !== a[0])
-    .map((p, i) => `<text class="axis" x="${X(p.t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : 'end'}">${esc(fmtDate(p.t, { day: 'numeric', month: 'short' }))}</text>`).join('');
+  const tFirst = Math.min(...xs), tLast = Math.max(...xs);
+  const xLabels = [tFirst, tLast].filter((t, i) => i === 0 || t !== tFirst)
+    .map((t, i) => `<text class="axis" x="${X(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : 'end'}">${esc(fmtDate(t, { day: 'numeric', month: 'short' }))}</text>`).join('');
 
-  const path = points.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
   const maxV = Math.max(...ys);
-  const dots = points.map((p) => `<circle class="dot${p.v === maxV ? ' best' : ''}" cx="${X(p.t)}" cy="${Y(p.v)}" r="4"/>`).join('');
+  const lines = series.map((s, k) => {
+    const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
+    const dots = s.points.map((p) => `<circle class="dot s${k}${series.length === 1 && p.v === maxV ? ' best' : ''}" cx="${X(p.t)}" cy="${Y(p.v)}" r="4"/>`).join('');
+    return `<path class="line s${k}" d="${path}"/>${dots}`;
+  }).join('');
+
+  const legend = series.length > 1
+    ? `<div class="legend">${series.map((s, k) => `<span><i class="sw s${k}"></i>${esc(s.name)}</span>`).join('')}</div>`
+    : '';
 
   container.innerHTML = `
     <div class="chart-wrap">
+      ${legend}
       <div class="readout"></div>
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Progress chart">
-        ${grid}${xLabels}
-        <path class="line" d="${path}"/>
-        ${dots}
+        ${grid}${xLabels}${lines}
         <line class="cross" y1="${m.t}" y2="${m.t + ih}" visibility="hidden"/>
-        <circle class="focus" r="6" visibility="hidden"/>
         <rect class="hit" x="${m.l}" y="0" width="${iw}" height="${H}"/>
       </svg>
     </div>`;
 
   const svg = container.querySelector('svg');
   const cross = svg.querySelector('.cross');
-  const focus = svg.querySelector('.focus');
   const readout = container.querySelector('.readout');
-  const setReadout = (p) => { readout.innerHTML = `<strong>${esc(format(p.v))}</strong><span>${esc(fmtDate(p.t, { day: 'numeric', month: 'short', year: 'numeric' }))}</span>${p.note ? `<span>${esc(p.note)}</span>` : ''}`; };
-  setReadout(points[points.length - 1]);
+  const times = [...new Set(xs)].sort((a, b) => a - b);
+
+  const setReadout = (t) => {
+    const parts = series.map((s) => {
+      const p = s.points.find((q) => q.t === t);
+      return p ? `<strong>${series.length > 1 ? `<i class="sw s${series.indexOf(s)}"></i>${esc(s.name)} ` : ''}${esc(format(p.v))}</strong>` : '';
+    }).filter(Boolean).join(' ');
+    const note = series.length === 1 ? series[0].points.find((q) => q.t === t)?.note : '';
+    readout.innerHTML = `${parts}<span>${esc(fmtDate(t, { day: 'numeric', month: 'short', year: 'numeric' }))}</span>${note ? `<span>${esc(note)}</span>` : ''}`;
+  };
+  setReadout(times[times.length - 1]);
 
   const show = (evt) => {
     const rect = svg.getBoundingClientRect();
     const px = ((evt.clientX - rect.left) / rect.width) * W;
-    let best = points[0];
-    for (const p of points) if (Math.abs(X(p.t) - px) < Math.abs(X(best.t) - px)) best = p;
-    const cx = X(best.t), cy = Y(best.v);
+    let best = times[0];
+    for (const t of times) if (Math.abs(X(t) - px) < Math.abs(X(best) - px)) best = t;
+    const cx = X(best);
     cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('visibility', 'visible');
-    focus.setAttribute('cx', cx); focus.setAttribute('cy', cy); focus.setAttribute('visibility', 'visible');
     setReadout(best);
   };
-  const hide = () => { cross.setAttribute('visibility', 'hidden'); focus.setAttribute('visibility', 'hidden'); setReadout(points[points.length - 1]); };
+  const hide = () => { cross.setAttribute('visibility', 'hidden'); setReadout(times[times.length - 1]); };
   svg.addEventListener('pointermove', show);
   svg.addEventListener('pointerdown', show);
   svg.addEventListener('pointerleave', hide);

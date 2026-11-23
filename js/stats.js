@@ -1,16 +1,35 @@
-// Derived numbers: bests, PRs, per-session metrics.
+// Derived numbers: bests, PRs, per-session metrics. Handles one-side-at-a-time sets
+// (left values in kg/reps/sec, right values in kgR/repsR/secR).
 import * as store from './store.js';
 import { e1rm, fmtNum } from './util.js';
 
-export function isValidSet(kind, s) {
-  if (kind === 'time') return s.sec > 0;
-  return s.reps > 0;
+const sideVal = (s, side) => (side === 'R' ? { kg: s.kgR, reps: s.repsR, sec: s.secR } : { kg: s.kg, reps: s.reps, sec: s.sec });
+export const isSidedSet = (s) => s && (s.repsR != null || s.secR != null || s.kgR != null);
+
+function validSide(kind, v) {
+  return kind === 'time' ? v.sec > 0 : v.reps > 0;
 }
 
+export function isValidSet(kind, s) {
+  if (!s) return false;
+  return validSide(kind, sideVal(s, 'L')) || (isSidedSet(s) && validSide(kind, sideVal(s, 'R')));
+}
+
+function scoreSide(kind, v) {
+  if (!validSide(kind, v)) return null;
+  if (kind === 'time') return v.sec || 0;
+  if (kind === 'reps') return v.reps || 0;
+  return e1rm(v.kg || 0, v.reps || 0) || 0;
+}
+
+// For one-side sets the weaker side counts — that's your real capacity.
 export function score(kind, s) {
-  if (kind === 'time') return s.sec || 0;
-  if (kind === 'reps') return s.reps || 0;
-  return e1rm(s.kg || 0, s.reps || 0) || 0;
+  const l = scoreSide(kind, sideVal(s, 'L'));
+  if (!isSidedSet(s)) return l ?? 0;
+  const r = scoreSide(kind, sideVal(s, 'R'));
+  if (l == null) return r ?? 0;
+  if (r == null) return l;
+  return Math.min(l, r);
 }
 
 export function fmtSec(sec) {
@@ -20,18 +39,26 @@ export function fmtSec(sec) {
   return m ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`;
 }
 
+function labelSide(kind, v, short) {
+  if (kind === 'time') return fmtSec(v.sec) || '–';
+  if (kind === 'reps') return short ? `${v.reps ?? '–'}` : `${v.reps ?? '–'} reps`;
+  return short ? `${fmtNum(v.kg ?? 0)}×${v.reps ?? '–'}` : `${fmtNum(v.kg ?? 0)}kg × ${v.reps ?? '–'}`;
+}
+
 export function setLabel(kind, s) {
   if (!s) return '';
-  if (kind === 'time') return fmtSec(s.sec);
-  if (kind === 'reps') return `${s.reps ?? ''} reps`;
-  return `${fmtNum(s.kg ?? 0)}kg × ${s.reps ?? ''}`;
+  if (isSidedSet(s)) return `L ${labelSide(kind, sideVal(s, 'L'))} · R ${labelSide(kind, sideVal(s, 'R'))}`;
+  return labelSide(kind, s);
 }
 
 export function shortLabel(kind, s) {
   if (!s) return '';
-  if (kind === 'time') return fmtSec(s.sec);
-  if (kind === 'reps') return `${s.reps}`;
-  return `${fmtNum(s.kg ?? 0)}×${s.reps}`;
+  if (isSidedSet(s)) return `${labelSide(kind, sideVal(s, 'L'), true)}|${labelSide(kind, sideVal(s, 'R'), true)}`;
+  return labelSide(kind, s, true);
+}
+
+export function sideShort(kind, s, side) {
+  return s ? labelSide(kind, sideVal(s, side), true) : '';
 }
 
 // Chronological (oldest first) list of {session, sets} for an exercise.
@@ -60,30 +87,76 @@ export function bestLabel(kind, set) {
   return setLabel(kind, set);
 }
 
-// Metrics available for the progress chart, per exercise kind.
+// Left vs right totals for the most recent session that tracked sides.
+export function imbalance(kind, sets) {
+  const sided = sets.filter(isSidedSet);
+  if (!sided.length) return null;
+  const tot = (side) => sided.reduce((a, s) => {
+    const v = sideVal(s, side);
+    if (kind === 'time') return a + (v.sec || 0);
+    if (kind === 'reps') return a + (v.reps || 0);
+    return a + ((v.kg || 0) > 0 ? v.kg * (v.reps || 0) : v.reps || 0);
+  }, 0);
+  const l = tot('L'), r = tot('R');
+  if (!l || !r) return null;
+  const pct = Math.round((1 - Math.min(l, r) / Math.max(l, r)) * 100);
+  return { pct, weaker: l < r ? 'Left' : r < l ? 'Right' : null, l, r };
+}
+
+export function imbalanceText(imb) {
+  if (!imb) return '';
+  if (imb.pct < 3 || !imb.weaker) return 'Left and right are balanced';
+  return `${imb.weaker} side ${imb.pct}% weaker`;
+}
+
+// Metrics available for the progress chart, per exercise kind. fn receives per-side values.
+const vals = (sets, side) => sets.map((s) => sideVal(s, side)).filter((v) => v.reps > 0 || v.sec > 0);
+const maxOr0 = (arr) => (arr.length ? Math.max(...arr) : null);
+const sumOr0 = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) : null);
 export const METRICS = {
   weight: [
-    { key: 'e1rm', label: 'Est. 1RM', unit: 'kg', fn: (sets) => Math.max(...sets.map((s) => e1rm(s.kg || 0, s.reps))) },
-    { key: 'top', label: 'Heaviest', unit: 'kg', fn: (sets) => Math.max(...sets.map((s) => s.kg || 0)) },
-    { key: 'vol', label: 'Volume', unit: 'kg', fn: (sets) => sets.reduce((a, s) => a + (s.kg || 0) * s.reps, 0) },
+    { key: 'e1rm', label: 'Est. 1RM', unit: 'kg', fn: (v) => maxOr0(v.map((x) => e1rm(x.kg || 0, x.reps))) },
+    { key: 'top', label: 'Heaviest', unit: 'kg', fn: (v) => maxOr0(v.map((x) => x.kg || 0)) },
+    { key: 'vol', label: 'Volume', unit: 'kg', fn: (v) => sumOr0(v.map((x) => (x.kg || 0) * x.reps)) },
   ],
   reps: [
-    { key: 'max', label: 'Best set', unit: 'reps', fn: (sets) => Math.max(...sets.map((s) => s.reps)) },
-    { key: 'total', label: 'Total reps', unit: 'reps', fn: (sets) => sets.reduce((a, s) => a + s.reps, 0) },
+    { key: 'max', label: 'Best set', unit: 'reps', fn: (v) => maxOr0(v.map((x) => x.reps)) },
+    { key: 'total', label: 'Total reps', unit: 'reps', fn: (v) => sumOr0(v.map((x) => x.reps)) },
   ],
   time: [
-    { key: 'max', label: 'Longest', unit: 's', fn: (sets) => Math.max(...sets.map((s) => s.sec)) },
-    { key: 'total', label: 'Total time', unit: 's', fn: (sets) => sets.reduce((a, s) => a + s.sec, 0) },
+    { key: 'max', label: 'Longest', unit: 's', fn: (v) => maxOr0(v.map((x) => x.sec)) },
+    { key: 'total', label: 'Total time', unit: 's', fn: (v) => sumOr0(v.map((x) => x.sec)) },
   ],
 };
 
-// Heaviest weight lifted for at least N reps.
+// Series for the chart: one line normally, Left + Right lines when sides were tracked.
+export function chartSeries(exerciseId, metric) {
+  const hist = historyFor(exerciseId);
+  const anySided = hist.some((h) => h.sets.some(isSidedSet));
+  const mk = (side, filter) => hist
+    .map((h) => {
+      const sets = filter ? h.sets.filter(filter) : h.sets;
+      const v = metric.fn(vals(sets, side));
+      return v == null ? null : { t: new Date(h.session.startedAt).getTime(), v: Math.round(v * 10) / 10, session: h.session };
+    })
+    .filter(Boolean);
+  if (!anySided) return [{ name: '', points: mk('L') }];
+  return [
+    { name: 'Left', points: mk('L', isSidedSet) },
+    { name: 'Right', points: mk('R', isSidedSet) },
+  ].filter((s) => s.points.length);
+}
+
+// Heaviest weight lifted for at least N reps (weaker side for one-side sets).
 export function repMaxes(history) {
   const targets = [1, 3, 5, 8, 10, 12];
   return targets.map((n) => {
     let best = null;
     for (const h of history) for (const s of h.sets) {
-      if (s.reps >= n && (s.kg || 0) > 0 && (!best || s.kg > best.set.kg)) best = { set: s, session: h.session };
+      const sides = isSidedSet(s) ? [sideVal(s, 'L'), sideVal(s, 'R')] : [sideVal(s, 'L')];
+      if (sides.some((v) => !(v.reps >= n))) continue;
+      const kg = Math.min(...sides.map((v) => v.kg || 0));
+      if (kg > 0 && (!best || kg > best.kg)) best = { kg, set: s, session: h.session };
     }
     return { reps: n, best };
   });
@@ -93,7 +166,10 @@ export function sessionVolume(session) {
   let v = 0;
   for (const e of session.exercises) {
     if (store.getExercise(e.exerciseId).kind !== 'weight') continue;
-    for (const s of e.sets) if (s.reps > 0) v += (s.kg || 0) * s.reps;
+    for (const s of e.sets) {
+      if (s.reps > 0) v += (s.kg || 0) * s.reps;
+      if (s.repsR > 0) v += (s.kgR || 0) * s.repsR;
+    }
   }
   return v;
 }

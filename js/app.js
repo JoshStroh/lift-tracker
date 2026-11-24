@@ -5,7 +5,7 @@ import * as stats from './stats.js';
 import * as cali from './cali.js';
 import * as gen from './generator.js';
 import { lineChart } from './chart.js';
-import { suggest } from './suggest.js';
+import { suggest, liveAdjust, RIR_LABEL } from './suggest.js';
 import { go, openModal, closeModal, actionSheet, runSheetAction, toast, thumb, visual, openInfo, infoHTML } from './ui.js';
 import { esc, uid, localDate, fmtNum, fmtDate, fmtTime, fmtDuration, fmtClock } from './util.js';
 
@@ -359,6 +359,7 @@ function exerciseBlock(s, e, i, editing) {
   const trackStep = track ? track.steps.find((st) => st.exerciseId === e.exerciseId) : null;
 
   const sug = !editing && store.state.settings.suggest !== false ? suggest(e.exerciseId, e, s) : null;
+  const live = sug ? liveAdjust(e.exerciseId, e, sug) : null; // re-aim remaining sets after each set
   const fields = kind === 'weight' ? [['kg', 'decimal'], ['reps', 'numeric']] : kind === 'reps' ? [['reps', 'numeric']] : [['sec', 'text']];
   const cols = kind === 'weight' ? ['kg', 'Reps'] : kind === 'reps' ? ['Reps'] : ['Time'];
 
@@ -371,11 +372,11 @@ function exerciseBlock(s, e, i, editing) {
   };
 
   const rows = e.sets.map((st, j) => {
-    const sp = sug?.sets?.[j] || null; // suggested numbers for this set
+    const sp = (live && !st.done && live.sets[j]) || sug?.sets?.[j] || null; // suggested numbers for this set
     const p = sp || prev[j] || prev[prev.length - 1];
     const isPR = st.done && bestScore != null && stats.isValidSet(kind, st) && stats.score(kind, st) > bestScore + 1e-9;
     const check = `<button class="check" data-act="toggle-set" data-ex="${i}" data-set="${j}" aria-label="Done">${isPR ? '🏆' : '✓'}</button>`;
-    const setno = `<button class="setno" data-act="set-menu" data-ex="${i}" data-set="${j}">${j + 1}</button>`;
+    const setno = `<button class="setno" data-act="set-menu" data-ex="${i}" data-set="${j}">${j + 1}${st.rir != null ? `<small>${stats.rirShort(st)}</small>` : ''}</button>`;
     if (!e.sides) {
       return `<tr class="${st.done ? 'done' : ''}">
         <td>${setno}</td>
@@ -408,6 +409,7 @@ function exerciseBlock(s, e, i, editing) {
       <div class="ex-stats small">
         ${goal ? `<div class="goal">${esc(goal)}</div>` : ''}
         ${sug ? `<button class="sugg ${sug.action}" data-act="sugg" data-ex="${i}"><span class="sugg-k">💡 Next</span> <strong>${esc(sug.title)}</strong><span class="why">Why?</span></button>` : ''}
+        ${live ? `<div class="live-note ${live.dir}">⚡ ${esc(live.note)}</div>` : ''}
         ${prev.length ? `<div><span class="muted">Last</span> ${esc(prev.map((x) => stats.shortLabel(kind, x)).join(' · '))}</div>` : '<div class="muted">First time — no history yet</div>'}
         ${best ? `<div><span class="muted">Best</span> ${esc(stats.bestLabel(kind, best))}</div>` : ''}
         ${imb ? `<div><span class="muted">L/R</span> ${esc(stats.imbalanceText(imb))}</div>` : ''}
@@ -462,7 +464,7 @@ async function toggleSet(i, j) {
       return;
     }
     st.done = true;
-    if (!s.endedAt) startRest();
+    if (!s.endedAt) startRest(undefined, { i, j, kind });
   } else {
     st.done = false;
   }
@@ -942,6 +944,7 @@ function viewSettings() {
       <h3>Progressive overload</h3>
       <label class="check-field"><input type="checkbox" data-setting="suggest" ${st.suggest !== false ? 'checked' : ''}> Suggest next weights &amp; reps</label>
       <p class="muted small">Uses double progression: add reps until every set hits the top of your range, then add 2.5–5% weight (ACSM guideline: 2–10% once you beat your target reps). Holds the weight if you fall short, backs off ~10% after two stalled sessions, and eases you back in after a 3-week break. Suggestions appear as the grey numbers in each set — tick ✓ to accept them.</p>
+      <p class="muted small"><strong>Reps left (RIR):</strong> after each set, tap Max / 1 / 2 / 3+ in the rest timer. If a set was too easy or too hard, the remaining sets are re-aimed at about 2 reps left (never more than ±10% per change), and next session's suggestion takes your effort into account. Optional — skip it and everything still works.</p>
     </section>
 
     <section class="card">
@@ -1135,25 +1138,45 @@ async function pickExercise(id) {
 let rest = null; // { endAt, total, finishedAt }
 let audioCtx = null;
 
-function startRest(seconds = store.state.settings.restSeconds) {
-  rest = { endAt: Date.now() + seconds * 1000, total: seconds, finishedAt: null };
-  renderRest();
+function startRest(seconds = store.state.settings.restSeconds, ref = rest?.ref || null) {
+  rest = { endAt: Date.now() + seconds * 1000, total: seconds, finishedAt: null, ref };
+  renderRest(true);
 }
-function stopRest() { rest = null; renderRest(); }
+function stopRest() { rest = null; renderRest(true); }
 
-function renderRest() {
-  if (!rest) { restBar.hidden = true; document.body.classList.remove('resting'); return; }
+function restSet() {
+  const r = rest?.ref;
+  const s = r && store.activeSession();
+  return s?.exercises[r.i]?.sets[r.j] || null;
+}
+
+// Full render only when the structure changes; the 500 ms tick just updates the clock, so
+// taps on the buttons are never lost to a re-render.
+function renderRest(full = false) {
+  if (!rest) { restBar.hidden = true; restBar.innerHTML = ''; document.body.classList.remove('resting'); return; }
   restBar.hidden = false;
   document.body.classList.add('resting');
   const left = Math.max(0, (rest.endAt - Date.now()) / 1000);
   const pct = rest.total ? (left / rest.total) * 100 : 0;
-  restBar.classList.toggle('over', !!rest.finishedAt);
+  const over = !!rest.finishedAt;
+  if (!full && restBar.dataset.over === String(over) && restBar.querySelector('.rest-time')) {
+    restBar.querySelector('.rest-time').textContent = over ? 'Rest over' : `Rest ${fmtClock(left)}`;
+    restBar.querySelector('.rest-fill').style.width = `${pct}%`;
+    return;
+  }
+  restBar.dataset.over = String(over);
+  restBar.classList.toggle('over', over);
+  const st = restSet();
+  const showRir = st && rest.ref.kind !== 'time';
   restBar.innerHTML = `
     <div class="rest-fill" style="width:${pct}%"></div>
-    <button data-act="rest-adj" data-d="-15">−15</button>
-    <div class="rest-time">${rest.finishedAt ? 'Rest over' : `Rest ${fmtClock(left)}`}</div>
-    <button data-act="rest-adj" data-d="15">+15</button>
-    <button data-act="rest-skip">${rest.finishedAt ? 'Close' : 'Skip'}</button>`;
+    ${showRir ? `<div class="rest-rir"><span>Set ${rest.ref.j + 1} · reps left?</span>${RIR_LABEL.map((l, v) => `<button class="${st.rir === v ? 'on' : ''}" data-act="rir" data-v="${v}">${l.replace(' left', '')}</button>`).join('')}</div>` : ''}
+    <div class="rest-row">
+      <button data-act="rest-adj" data-d="-15">−15</button>
+      <div class="rest-time">${over ? 'Rest over' : `Rest ${fmtClock(left)}`}</div>
+      <button data-act="rest-adj" data-d="15">+15</button>
+      <button data-act="rest-skip">${over ? 'Close' : 'Skip'}</button>
+    </div>`;
 }
 
 function beep() {
@@ -1199,8 +1222,8 @@ function tick() {
     el.textContent = h ? `${h}:${fmtClock(sec % 3600).padStart(5, '0')}` : fmtClock(sec);
   }
   if (rest) {
-    if (!rest.finishedAt && Date.now() >= rest.endAt) { rest.finishedAt = Date.now(); beep(); }
-    if (rest.finishedAt && Date.now() - rest.finishedAt > 8000) stopRest();
+    if (!rest.finishedAt && Date.now() >= rest.endAt) { rest.finishedAt = Date.now(); beep(); renderRest(true); }
+    if (rest.finishedAt && Date.now() - rest.finishedAt > 12000) stopRest();
     else renderRest();
   }
 }
@@ -1245,7 +1268,11 @@ const ACTIONS = {
   'set-menu': (el) => {
     const s = editingSession();
     const i = +el.dataset.ex, j = +el.dataset.set;
-    actionSheet(`Set ${j + 1}`, [{ label: 'Delete set', danger: true, run: async () => { s.exercises[i].sets.splice(j, 1); await store.saveDoc(s); } }]);
+    const st = s.exercises[i].sets[j];
+    const kind = store.getExercise(s.exercises[i].exerciseId).kind;
+    const effort = kind === 'time' ? [] : RIR_LABEL.map((l, v) => ({ label: `${st.rir === v ? '✓ ' : ''}Reps left: ${l}`, run: async () => { st.rir = v; await store.saveDoc(s); } }));
+    if (st.rir != null) effort.push({ label: 'Clear reps left', run: async () => { delete st.rir; await store.saveDoc(s); } });
+    actionSheet(`Set ${j + 1}`, [...effort, { label: 'Delete set', danger: true, run: async () => { s.exercises[i].sets.splice(j, 1); await store.saveDoc(s); } }]);
   },
   'ex-menu': (el) => {
     const s = editingSession();
@@ -1361,9 +1388,18 @@ const ACTIONS = {
     if (rest.finishedAt) { if (d > 0) startRest(d); return; }
     rest.endAt += d * 1000;
     rest.total = Math.max(1, rest.total + d);
-    renderRest();
+    renderRest(true);
   },
   'rest-skip': () => stopRest(),
+  rir: async (el) => {
+    const s = store.activeSession();
+    const st = restSet();
+    if (!s || !st) return;
+    const v = +el.dataset.v;
+    if (st.rir === v) delete st.rir; else st.rir = v;
+    await store.saveDoc(s);
+    renderRest(true);
+  },
   'bw-add': () => openBwForm(),
   'bw-range': (el) => { bwRange = el.dataset.range; renderMain(); },
   'bw-entry': (el) => {

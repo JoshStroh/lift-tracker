@@ -10,6 +10,10 @@
 //  • Missed the bottom of the range: hold the weight. Missed it two sessions in a row at the
 //    same weight: back off ~10% and build up again (a common deload convention).
 //  • Long break (3+ weeks): restart at ~90% to ease back in.
+//  • Reps in reserve (RIR, optional per set): 3+ left on every set → bigger jump / +2 reps;
+//    max effort (0 left) on several sets → repeat the weight before adding more.
+//    During a workout, liveAdjust() re-estimates the weight for the remaining sets from the
+//    last set's weight × (reps + RIR) so they land at ~2 reps in reserve (capped at ±10%).
 //  • Bodyweight / holds: add a rep or 5 s per set; at the top of the range, move to the next
 //    calisthenics step (or add reps / weight if there is none).
 
@@ -118,11 +122,19 @@ export function suggest(exerciseId, entry = {}, session = null) {
       return { action: 'return', range, sets: mk([{ kg, reps: range.lo }]), title: `${fmtNum(kg)} kg × ${range.lo}`,
         reason: `It's been ${Math.round(daysSince)} days since you last did this. Ease back in at about 90% (${fmtNum(kg)} kg instead of ${fmtNum(W)} kg) for ${range.lo} reps, then resume normal progression.${imbNote}` };
     }
+    const rirs = atW.map((s) => s.rir).filter((v) => v != null);
+    const allEasy = rirs.length === atW.length && rirs.length > 0 && rirs.every((v) => v >= 3);
+    const failures = rirs.filter((v) => v === 0).length;
+    const failNote = failures >= 2 && COMPOUND.has(ex.pattern) ? ' Tip: stopping 1–2 reps short of failure gives similar gains with less fatigue and injury risk, especially on big lifts.' : '';
+    if (reps.length && reps.every((r) => r >= range.hi) && failures >= 2) {
+      return { action: 'hold', range, sets: mk([{ kg: W, reps: range.hi }]), title: `= ${fmtNum(W)} kg × ${range.hi}`,
+        reason: `You reached ${range.hi} reps at ${fmtNum(W)} kg, but ${failures} sets were all-out (0 reps left). Repeat this weight once more, aiming for 1–2 reps left on every set, before adding load.${failNote}${imbNote}` };
+    }
     if (reps.length && reps.every((r) => r >= range.hi)) {
-      const inc = increment(ex, W);
+      const inc = allEasy ? Math.min(increment(ex, W) * 2, Math.max(increment(ex, W), roundTo(W * 0.1, stepSize(ex, W)))) : increment(ex, W);
       const kg = W + inc;
       return { action: 'increase', range, sets: mk([{ kg, reps: range.lo }]), title: `↑ ${fmtNum(kg)} kg × ${range.lo}`,
-        reason: `You hit the top of your ${rangeTxt} range on every set at ${fmtNum(W)} kg (${list(reps)}). Add ${fmtNum(inc)} kg (${pctStr(W, kg)}) and start again at ${range.lo} reps. Guidelines suggest a 2–10% jump once you can beat your target reps.${inc / W > 0.1 ? ` That's the smallest step available here but more than 10%, so expect fewer reps at first — if form slips, go back to ${fmtNum(W)} kg and add a rep or two instead.` : ''}${imbNote}` };
+        reason: `You hit the top of your ${rangeTxt} range on every set at ${fmtNum(W)} kg (${list(reps)}). Add ${fmtNum(inc)} kg (${pctStr(W, kg)}) and start again at ${range.lo} reps. ${allEasy ? ' Every set had 3+ reps left, so this is a bigger jump than usual.' : ''} Guidelines suggest a 2–10% jump once you can beat your target reps.${inc / W > 0.1 ? ` That's the smallest step available here but more than 10%, so expect fewer reps at first — if form slips, go back to ${fmtNum(W)} kg and add a rep or two instead.` : ''}${imbNote}` };
     }
     if (reps.some((r) => r < range.lo)) {
       const prevAtW = prev ? prev.sets.filter((s) => Math.abs(effKg(s) - W) < 0.01).map(effReps) : [];
@@ -136,9 +148,10 @@ export function suggest(exerciseId, entry = {}, session = null) {
       return { action: 'hold', range, sets: mk(atW.length ? atW.map((s) => ({ kg: W, reps: Math.max(range.lo, Math.min(range.hi, effReps(s) + 1)) })) : [{ kg: W, reps: range.lo }]), title: `= ${fmtNum(W)} kg × ${range.lo}+`,
         reason: `Last time some sets fell short of ${range.lo} reps at ${fmtNum(W)} kg (${list(reps)}). Stay at this weight and aim for at least ${range.lo} on every set before adding load.${imbNote}` };
     }
-    const target = atW.map((s) => ({ kg: W, reps: Math.min(range.hi, effReps(s) + 1) }));
+    const add = allEasy ? 2 : 1;
+    const target = atW.map((s) => ({ kg: W, reps: Math.min(range.hi, effReps(s) + add) }));
     return { action: 'reps', range, sets: mk(target), title: `${fmtNum(W)} kg × ${target.map((t) => t.reps).join('·')}`,
-      reason: `Same weight, one more rep per set (last time: ${list(reps)}). Once every set reaches ${range.hi}, the app will suggest adding weight.${imbNote}` };
+      reason: `Same weight, ${add === 2 ? 'two more reps per set — every set had 3+ reps left' : 'one more rep per set'} (last time: ${list(reps)}). Once every set reaches ${range.hi}, the app will suggest adding weight.${failNote}${imbNote}` };
   }
 
   // ---------- bodyweight reps ----------
@@ -157,7 +170,8 @@ export function suggest(exerciseId, entry = {}, session = null) {
       return { action: 'reps', range, sets: mk([{ reps: r }]), title: `${r} reps`,
         reason: `You reached ${range.hi}+ on every set (${list(reps)}). Keep adding reps, or make it harder (slower lowering, pause, a weight vest or a harder variation).${imbNote}` };
     }
-    const target = last.sets.map((s) => ({ reps: Math.min(range.hi, effReps(s) + 1) }));
+    const bwEasy = last.sets.every((s) => s.rir != null && s.rir >= 3);
+    const target = last.sets.map((s) => ({ reps: Math.min(range.hi, effReps(s) + (bwEasy ? 2 : 1)) }));
     return { action: 'reps', range, sets: mk(target), title: `${target.map((t) => t.reps).join('·')} reps`,
       reason: `One more rep per set than last time (${list(reps)}), working towards ${range.hi} on every set.${imbNote}` };
   }
@@ -182,3 +196,73 @@ export function suggest(exerciseId, entry = {}, session = null) {
 }
 
 export const ICON = { increase: '↑', reps: '+', hold: '=', deload: '↓', return: '↺', harder: '★', first: '•' };
+
+// ---------- during a workout ----------
+
+export const RIR_LABEL = ['Max', '1 left', '2 left', '3+ left'];
+
+// After a completed set, re-aim the remaining (not yet done) sets of this exercise.
+// Returns { from, sets: {setIndex: values}, note, dir } or null when no change is needed.
+export function liveAdjust(exerciseId, entry, sug) {
+  const ex = store.getExercise(exerciseId);
+  const kind = ex.kind || 'weight';
+  if (kind === 'time' || !entry?.sets?.length) return null;
+  const range = sug?.range || rangeFor(ex, entry);
+  let idx = -1;
+  entry.sets.forEach((st, j) => { if (st.done && stats.isValidSet(kind, st)) idx = j; });
+  if (idx < 0) return null;
+  const remaining = entry.sets.map((st, j) => (j > idx && !st.done ? j : -1)).filter((j) => j >= 0);
+  if (!remaining.length) return null;
+  const st = entry.sets[idx];
+  const reps = effReps(st);
+  let r = st.rir;
+  if (r == null) {
+    if (reps >= range.hi + 2) r = 2;          // not logged, but clearly too light
+    else if (reps < range.lo - 1) r = 0;      // not logged, but clearly too heavy
+    else return null;
+  }
+  const sided = entry.sides;
+  const pack = (v) => (sided ? { ...v, ...(v.kg != null ? { kgR: v.kg } : {}), repsR: v.reps } : v);
+  const out = {};
+
+  if (kind === 'weight') {
+    const kg = effKg(st);
+    if (!(kg > 0)) return null;
+    if (r >= 1 && r <= 2 && reps >= range.lo && reps <= range.hi) return null; // on target
+    const planned = sug?.sets?.[remaining[0]]?.reps;
+    const tReps = Math.max(range.lo, Math.min(range.hi, planned ?? reps));
+    const e1 = kg * (1 + (reps + Math.min(r, 3)) / 30);          // Epley, counting reps left
+    let next = e1 / (1 + (tReps + 2) / 30);                      // aim for ~2 reps in reserve
+    next = Math.max(kg * 0.9, Math.min(kg * 1.1, next));         // never more than ±10% per change
+    const step = stepSize(ex, kg);
+    // round towards the current weight so the ±10% cap holds after rounding
+    next = next > kg ? Math.floor(next / step + 1e-9) * step : Math.ceil(next / step - 1e-9) * step;
+    if (Math.abs(next - kg) < step - 1e-9) {
+      if (r >= 3) next = kg + step;
+      else if (r === 0 && reps < range.lo) next = Math.max(step, kg - step);
+      else return null;
+    }
+    if (next === kg) return null;
+    for (const j of remaining) out[j] = pack({ kg: next, reps: tReps });
+    const up = next > kg;
+    return {
+      from: idx, sets: out, dir: up ? 'up' : 'down',
+      note: up
+        ? `Set ${idx + 1} felt light (${st.rir != null ? RIR_LABEL[st.rir] : `${reps} reps`}) → try ${fmtNum(next)} kg × ${tReps} for the next set${remaining.length > 1 ? 's' : ''}`
+        : `Set ${idx + 1} was ${r === 0 ? 'all-out' : 'heavy'} (${st.rir != null ? RIR_LABEL[st.rir] : `${reps} reps`}) → drop to ${fmtNum(next)} kg × ${tReps}`,
+    };
+  }
+
+  // bodyweight reps: aim for ~2 in reserve
+  if (r >= 1 && r <= 2) return null;
+  const tReps = Math.max(1, reps + Math.min(r, 3) - 2);
+  if (tReps === reps && r !== 0) return null;
+  for (const j of remaining) out[j] = pack({ reps: tReps });
+  const ts = trackStepFor(exerciseId, entry);
+  return {
+    from: idx, sets: out, dir: r >= 3 ? 'up' : 'down',
+    note: r >= 3
+      ? `Set ${idx + 1} felt easy → aim for ${tReps} reps${ts?.next && reps >= range.hi ? `, or try ${ts.next.name}` : ''}`
+      : `Set ${idx + 1} was all-out → aim for ${tReps} reps with ~2 in reserve`,
+  };
+}

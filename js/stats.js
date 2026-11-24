@@ -45,16 +45,19 @@ function labelSide(kind, v, short) {
   return short ? `${fmtNum(v.kg ?? 0)}×${v.reps ?? '–'}` : `${fmtNum(v.kg ?? 0)}kg × ${v.reps ?? '–'}`;
 }
 
+export const rirShort = (s) => (s?.rir == null ? '' : `@${s.rir >= 3 ? '3+' : s.rir}`);
+const rirLong = (s) => (s?.rir == null ? '' : s.rir === 0 ? ' (max effort)' : ` (${s.rir >= 3 ? '3+' : s.rir} left)`);
+
 export function setLabel(kind, s) {
   if (!s) return '';
-  if (isSidedSet(s)) return `L ${labelSide(kind, sideVal(s, 'L'))} · R ${labelSide(kind, sideVal(s, 'R'))}`;
-  return labelSide(kind, s);
+  if (isSidedSet(s)) return `L ${labelSide(kind, sideVal(s, 'L'))} · R ${labelSide(kind, sideVal(s, 'R'))}${rirLong(s)}`;
+  return labelSide(kind, s) + rirLong(s);
 }
 
 export function shortLabel(kind, s) {
   if (!s) return '';
-  if (isSidedSet(s)) return `${labelSide(kind, sideVal(s, 'L'), true)}|${labelSide(kind, sideVal(s, 'R'), true)}`;
-  return labelSide(kind, s, true);
+  if (isSidedSet(s)) return `${labelSide(kind, sideVal(s, 'L'), true)}|${labelSide(kind, sideVal(s, 'R'), true)}${rirShort(s)}`;
+  return labelSide(kind, s, true) + rirShort(s);
 }
 
 export function sideShort(kind, s, side) {

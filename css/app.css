@@ -233,7 +233,7 @@ label.btn { position: relative; }
 #rest {
   position: fixed; left: 10px; right: 10px; z-index: 9;
   bottom: calc(var(--tabbar-h, 90px) + 8px);
-  display: flex; align-items: center; gap: 6px; padding: 8px;
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
   background: var(--text); color: var(--bg); border-radius: 16px; overflow: hidden;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
@@ -451,3 +451,15 @@ h2.inline { margin: 14px 4px 8px; }
 .sugg-line strong { color: var(--text); }
 .sugg-card strong { font-size: 20px; display: block; margin: 2px 0; }
 .sugg-big { font-size: 24px; font-weight: 800; margin: 4px 0 8px; }
+
+/* reps in reserve */
+#rest .rest-row { position: relative; display: flex; align-items: center; gap: 6px; }
+#rest .rest-rir { position: relative; display: flex; align-items: center; gap: 5px; }
+#rest .rest-rir span { font-size: 12px; font-weight: 600; opacity: 0.8; margin-right: auto; white-space: nowrap; }
+#rest .rest-rir button { padding: 7px 0; min-width: 44px; font-size: 14px; }
+#rest .rest-rir button.on { background: var(--accent); color: #fff; }
+.setno small { display: block; font-size: 9px; line-height: 1; color: var(--accent); font-weight: 700; }
+.setno { height: auto; min-height: 30px; }
+.live-note { font-size: 13px; font-weight: 600; padding: 6px 9px; border-radius: 9px; margin: 2px 0; background: var(--surface-2); }
+.live-note.up { color: var(--done-ink); }
+.live-note.down { color: var(--gold); }

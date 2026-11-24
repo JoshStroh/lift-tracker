@@ -8,6 +8,7 @@ A gym log that runs as a home-screen app on iPhone. No App Store, no developer a
 - **Calisthenics tab:** 15 progression tracks (pull-up, dips, rows, push-up, squat, hinge, core, leg raise, muscle-up, L-sit, handstand, HSPU, front lever, back lever, planche), automatic "ready to level up" detection, and a Beginner → Elite rank
 - Quick-start Push / Pull / Legs / Abs & Stretch days that copy what you did last time
 - Each exercise shows **last time** and your **all-time best**; tick a set to start the rest timer
+- **Progressive overload suggestions** for every exercise you repeat: double progression with ACSM-style 2–10% load jumps, holds when you fall short, a ~10% back-off after two stalled sessions, an easier restart after a 3-week break, and "move to the harder variation" for calisthenics (rules in `js/suggest.js`)
 - Progress charts (estimated 1RM, heaviest, volume), rep-max PRs, 🏆 badges for new records
 - **Body weight** log (kg) with a trend chart and 7 / 30 / 90-day change
 - Works offline; data is saved on the phone first, then synced to **your own private GitHub repo** as JSON
@@ -79,6 +80,7 @@ js/cali.js       calisthenics tracks, standards, ranks
 js/generator.js  "Create for me" workout builder
 js/poses.js      stick-figure diagrams for skills without photos
 js/ui.js         shared sheets, thumbnails, exercise info
+js/suggest.js    progressive overload rules
 img/ex/          exercise photos + instructions
 js/stats.js      bests, PRs, chart metrics
 js/chart.js      SVG line chart

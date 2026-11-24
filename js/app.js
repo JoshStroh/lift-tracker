@@ -5,6 +5,7 @@ import * as stats from './stats.js';
 import * as cali from './cali.js';
 import * as gen from './generator.js';
 import { lineChart } from './chart.js';
+import { suggest } from './suggest.js';
 import { go, openModal, closeModal, actionSheet, runSheetAction, toast, thumb, visual, openInfo, infoHTML } from './ui.js';
 import { esc, uid, localDate, fmtNum, fmtDate, fmtTime, fmtDuration, fmtClock } from './util.js';
 
@@ -24,7 +25,7 @@ function route() {
 let mainDirty = false;
 const typing = () => {
   const a = document.activeElement;
-  return a && main.contains(a) && a.matches('input:not([type=date]), textarea');
+  return a && main.contains(a) && a.matches('input:not([type=date]):not([type=checkbox]):not([type=radio]):not([type=file]), textarea');
 };
 
 function render() {
@@ -320,6 +321,7 @@ function planRow(p, e, i) {
           <span class="muted">${unit}${e.sides ? ' each side' : ''}</span>
         </div>
         ${e.track ? `<div class="small muted">🤸 ${esc(cali.getTrack(e.track)?.name || '')} track</div>` : ''}
+        ${(() => { if (store.state.settings.suggest === false) return ''; const sg = suggest(e.exerciseId, { sets: e.sets || 3, target: e.target, track: e.track, sides: e.sides }); return sg.action === 'first' ? '' : `<div class="small sugg-line">💡 Next time: <strong>${esc(sg.title)}</strong></div>`; })()}
       </div>
     </div>`;
 }
@@ -356,6 +358,7 @@ function exerciseBlock(s, e, i, editing) {
   const track = e.track ? cali.getTrack(e.track) : null;
   const trackStep = track ? track.steps.find((st) => st.exerciseId === e.exerciseId) : null;
 
+  const sug = !editing && store.state.settings.suggest !== false ? suggest(e.exerciseId, e, s) : null;
   const fields = kind === 'weight' ? [['kg', 'decimal'], ['reps', 'numeric']] : kind === 'reps' ? [['reps', 'numeric']] : [['sec', 'text']];
   const cols = kind === 'weight' ? ['kg', 'Reps'] : kind === 'reps' ? ['Reps'] : ['Time'];
 
@@ -368,7 +371,8 @@ function exerciseBlock(s, e, i, editing) {
   };
 
   const rows = e.sets.map((st, j) => {
-    const p = prev[j] || prev[prev.length - 1];
+    const sp = sug?.sets?.[j] || null; // suggested numbers for this set
+    const p = sp || prev[j] || prev[prev.length - 1];
     const isPR = st.done && bestScore != null && stats.isValidSet(kind, st) && stats.score(kind, st) > bestScore + 1e-9;
     const check = `<button class="check" data-act="toggle-set" data-ex="${i}" data-set="${j}" aria-label="Done">${isPR ? '🏆' : '✓'}</button>`;
     const setno = `<button class="setno" data-act="set-menu" data-ex="${i}" data-set="${j}">${j + 1}</button>`;
@@ -381,7 +385,7 @@ function exerciseBlock(s, e, i, editing) {
     }
     const pl = prev[j] && stats.isSidedSet(prev[j]) ? prev[j] : null;
     const pp = p && stats.isSidedSet(p) ? p : p;
-    const ppR = pp ? { kgR: pp.kgR ?? pp.kg, repsR: pp.repsR ?? pp.reps, secR: pp.secR ?? pp.sec } : null;
+    const ppR = sp ? sp : pp ? { kgR: pp.kgR ?? pp.kg, repsR: pp.repsR ?? pp.reps, secR: pp.secR ?? pp.sec } : null;
     return `<tr class="${st.done ? 'done' : ''} side-l">
         <td rowspan="2">${setno}</td>
         <td class="prev"><span class="lr">L</span>${esc(pl ? stats.sideShort(kind, pl, 'L') : prev[j] ? stats.shortLabel(kind, prev[j]) : '—')}</td>
@@ -403,6 +407,7 @@ function exerciseBlock(s, e, i, editing) {
       </div>
       <div class="ex-stats small">
         ${goal ? `<div class="goal">${esc(goal)}</div>` : ''}
+        ${sug ? `<button class="sugg ${sug.action}" data-act="sugg" data-ex="${i}"><span class="sugg-k">💡 Next</span> <strong>${esc(sug.title)}</strong><span class="why">Why?</span></button>` : ''}
         ${prev.length ? `<div><span class="muted">Last</span> ${esc(prev.map((x) => stats.shortLabel(kind, x)).join(' · '))}</div>` : '<div class="muted">First time — no history yet</div>'}
         ${best ? `<div><span class="muted">Best</span> ${esc(stats.bestLabel(kind, best))}</div>` : ''}
         ${imb ? `<div><span class="muted">L/R</span> ${esc(stats.imbalanceText(imb))}</div>` : ''}
@@ -653,6 +658,7 @@ function viewExercise(id) {
     </div>
     ${hist.length ? `
       ${hero}
+      ${(() => { const sg = suggest(id, {}); return `<div class="card sugg-card"><div class="muted small">💡 Suggested next session</div><strong>${esc(sg.title)}</strong><p class="small">${esc(sg.reason)}</p></div>`; })()}
       ${imb ? `<div class="card"><strong>Left vs right</strong><div class="small">${esc(stats.imbalanceText(imb))} <span class="muted">(last time it was tracked)</span></div></div>` : ''}
       <section class="card">
         <div class="seg" role="tablist">
@@ -930,6 +936,12 @@ function viewSettings() {
         </select>
       </label>
       <p class="muted small">Starts automatically when you tick a set. iPhone only lets it beep while the app is open.</p>
+    </section>
+
+    <section class="card">
+      <h3>Progressive overload</h3>
+      <label class="check-field"><input type="checkbox" data-setting="suggest" ${st.suggest !== false ? 'checked' : ''}> Suggest next weights &amp; reps</label>
+      <p class="muted small">Uses double progression: add reps until every set hits the top of your range, then add 2.5–5% weight (ACSM guideline: 2–10% once you beat your target reps). Holds the weight if you fall short, backs off ~10% after two stalled sessions, and eases you back in after a 3-week break. Suggestions appear as the grey numbers in each set — tick ✓ to accept them.</p>
     </section>
 
     <section class="card">
@@ -1361,6 +1373,32 @@ const ACTIONS = {
       { label: 'Delete', danger: true, run: () => store.deleteDoc(d) },
     ]);
   },
+  sugg: (el) => {
+    const s = editingSession();
+    const i = +el.dataset.ex;
+    const e = s.exercises[i];
+    const sg = suggest(e.exerciseId, e, s);
+    openModal(`
+      <div class="info-head"><span></span><button class="link-btn" data-act="close-modal">Close</button></div>
+      <h2 class="info-title">💡 ${esc(store.exerciseName(e.exerciseId))}</h2>
+      <p class="sugg-big">${esc(sg.title)}</p>
+      <p>${esc(sg.reason)}</p>
+      ${sg.sets ? `<button class="btn wide primary" data-act="sugg-fill" data-ex="${i}">Fill in these numbers</button>` : ''}
+      <p class="muted small">Suggestions follow double progression and the ACSM 2–10% load guideline. Listen to your body: if a set feels unsafe, stop.</p>`);
+  },
+  'sugg-fill': async (el) => {
+    const s = editingSession();
+    const e = s.exercises[+el.dataset.ex];
+    const sg = suggest(e.exerciseId, e, s);
+    closeModal();
+    if (!sg.sets) return;
+    e.sets.forEach((st, j) => {
+      if (st.done) return;
+      const v = sg.sets[j] || sg.sets[sg.sets.length - 1];
+      for (const [k, val] of Object.entries(v)) if (st[k] == null) st[k] = val;
+    });
+    await store.saveDoc(s);
+  },
   'sync-now': () => sync(),
   export: () => exportData(),
 };
@@ -1409,6 +1447,7 @@ document.addEventListener('keydown', (evt) => {
 document.addEventListener('change', async (evt) => {
   const el = evt.target;
   if (el.dataset.setting === 'restSeconds') await store.saveSettings({ restSeconds: +el.value });
+  if (el.dataset.setting === 'suggest') await store.saveSettings({ suggest: el.checked });
   if (el.id === 'import-file' && el.files[0]) await importData(el.files[0]);
   if (el.dataset.planField === 'date') { const p = editingPlan(); p.date = el.value || null; await store.saveDoc(p); }
   if (el.id === 'wiz-date') wiz.date = el.value || null;
@@ -1450,7 +1489,14 @@ async function boot() {
   await store.init();
   store.onChange(render);
   store.setSyncHandler(sync);
-  window.addEventListener('hashchange', () => { closeModal(); render(); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', () => {
+    closeModal();
+    if (typing()) document.activeElement.blur(); // leaving the screen: always show the new one
+    mainDirty = false;
+    renderHeader();
+    renderMain();
+    window.scrollTo(0, 0);
+  });
   render();
   sync();
   document.addEventListener('visibilitychange', () => {

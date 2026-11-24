@@ -1,11 +1,11 @@
 // Offline support: serve the app from cache, refresh the cache in the background.
 // Bump VERSION when files are added/removed.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = `lift-tracker-${VERSION}`;
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/store.js', 'js/db.js', 'js/sync.js', 'js/util.js', 'js/exercises.js', 'js/stats.js', 'js/chart.js',
-  'js/catalog.js', 'js/poses.js', 'js/cali.js', 'js/generator.js', 'js/ui.js', 'img/ex/info.json',
+  'js/catalog.js', 'js/poses.js', 'js/cali.js', 'js/generator.js', 'js/ui.js', 'js/suggest.js', 'img/ex/info.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 

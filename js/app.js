@@ -1295,7 +1295,22 @@ document.addEventListener('submit', async (evt) => {
 
 // ================================================================ boot
 
+// Reserve exactly as much room at the bottom as the tab bar and rest timer really take
+// (their height varies with the iPhone model, safe area and text-size setting).
+function trackBarHeights() {
+  const set = () => {
+    const root = document.documentElement.style;
+    root.setProperty('--tabbar-h', `${Math.ceil(tabs.getBoundingClientRect().height)}px`);
+    if (!restBar.hidden) root.setProperty('--rest-h', `${Math.ceil(restBar.getBoundingClientRect().height)}px`);
+  };
+  set();
+  if ('ResizeObserver' in window) { const ro = new ResizeObserver(set); ro.observe(tabs); ro.observe(restBar); }
+  window.addEventListener('resize', set);
+  window.addEventListener('orientationchange', () => setTimeout(set, 300));
+}
+
 async function boot() {
+  trackBarHeights();
   await store.init();
   store.onChange(render);
   store.setSyncHandler(sync);

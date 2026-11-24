@@ -12,13 +12,11 @@ export const go = (hash) => { location.hash = hash; };
 export function closeModal() {
   modal.innerHTML = '';
   modal.hidden = true;
-  document.body.classList.remove('modal-open');
 }
 
 export function openModal(html, { cls = '' } = {}) {
   modal.innerHTML = `<div class="backdrop" data-act="close-modal"></div><div class="sheet ${cls}">${html}</div>`;
   modal.hidden = false;
-  document.body.classList.add('modal-open');
   return modal.querySelector('.sheet');
 }
 

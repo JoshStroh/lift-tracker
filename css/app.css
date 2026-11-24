@@ -58,10 +58,10 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  /* --tabbar-h / --rest-h are measured from the real elements in app.js */
+  padding-bottom: calc(var(--tabbar-h, 90px) + 24px);
 }
-body.resting { padding-bottom: calc(132px + env(safe-area-inset-bottom)); }
-body.modal-open { overflow: hidden; }
+body.resting { padding-bottom: calc(var(--tabbar-h, 90px) + var(--rest-h, 60px) + 32px); }
 
 a { color: var(--accent); text-decoration: none; }
 h1 { font-size: 28px; margin: 8px 0 14px; letter-spacing: -0.02em; }
@@ -105,7 +105,7 @@ p { margin: 6px 0; }
   -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   border-top: 1px solid var(--border);
 }
-#tabs a { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; color: var(--muted); padding: 4px 0; }
+#tabs a { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; color: var(--muted); padding: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 #tabs a.on { color: var(--accent); }
 #tabs svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -232,7 +232,7 @@ label.btn { position: relative; }
 #rest[hidden], #modal[hidden] { display: none; }
 #rest {
   position: fixed; left: 10px; right: 10px; z-index: 9;
-  bottom: calc(68px + env(safe-area-inset-bottom));
+  bottom: calc(var(--tabbar-h, 90px) + 8px);
   display: flex; align-items: center; gap: 6px; padding: 8px;
   background: var(--text); color: var(--bg); border-radius: 16px; overflow: hidden;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
@@ -245,8 +245,9 @@ label.btn { position: relative; }
 
 /* modal / sheets */
 #modal { position: fixed; inset: 0; z-index: 20; }
-.backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4); }
+.backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4); touch-action: none; }
 .sheet {
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   position: absolute; left: 0; right: 0; bottom: 0; max-height: 88vh; overflow: auto;
   background: var(--surface); border-radius: 18px 18px 0 0;
   padding: 8px 8px calc(12px + env(safe-area-inset-bottom));
@@ -381,7 +382,12 @@ h2.inline { margin: 14px 4px 8px; }
 .stepper button { width: 32px; height: 32px; border: 0; background: var(--surface-2); color: var(--text); font-size: 18px; font-weight: 700; }
 .stepper span { min-width: 26px; text-align: center; font-weight: 700; }
 .target { width: 64px; font: inherit; font-size: 15px; font-weight: 600; text-align: center; padding: 6px 4px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
-.plan-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0; }
+.plan-actions {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  position: sticky; bottom: calc(var(--tabbar-h, 90px) + 8px); z-index: 4;
+  margin: 10px -6px; padding: 8px 6px; border-radius: 16px;
+  background: var(--bg); box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.08);
+}
 
 /* calisthenics */
 .rank { padding: 16px; }

@@ -34,7 +34,7 @@ function render() {
   renderMain();
 }
 
-const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali' };
+const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali', bodyweight: 'progress' };
 
 function renderMain() {
   const r = route();
@@ -45,7 +45,8 @@ function renderMain() {
   switch (r.name) {
     case 'history': main.innerHTML = viewHistory(); break;
     case 'session': main.innerHTML = r.sub === 'edit' ? viewEditor(store.getDoc(r.id), true) : viewSession(r.id); break;
-    case 'progress': main.innerHTML = viewProgress(); break;
+    case 'progress': main.innerHTML = viewProgress(); drawBwSpark(); break;
+    case 'bodyweight': main.innerHTML = viewBodyweight(); drawBwChart(); break;
     case 'exercise': main.innerHTML = viewExercise(r.id); drawExerciseChart(r.id); break;
     case 'plan': main.innerHTML = viewPlan(r.id); break;
     case 'cali': main.innerHTML = viewCali(); break;
@@ -596,6 +597,8 @@ function viewProgress() {
       <div class="tile"><span class="tile-num">${inMonth}</span><span class="tile-label">This month</span></div>
       <div class="tile"><span class="tile-num">${finished.length}</span><span class="tile-label">All time</span></div>
     </div>
+    ${bwCard()}
+    <h2>Exercises</h2>
     <input class="search" id="progress-q" type="search" placeholder="Search your exercises" value="${esc(progressQuery)}" autocomplete="off">
     <div id="progress-list">${progressList()}</div>`;
 }
@@ -691,6 +694,129 @@ function drawExerciseChart(id) {
   }
   const format = metric.unit === 's' ? (v) => stats.fmtSec(v) : (v) => `${fmtNum(v)} ${metric.unit}`;
   lineChart(el, series, { format });
+}
+
+
+// ================================================================ body weight
+
+const bwEntries = () => store.docs('bodyweight').filter((d) => d.kg > 0).sort((a, b) => a.date.localeCompare(b.date));
+const bwT = (d) => new Date(d.date + 'T12:00:00').getTime();
+
+function bwChange(entries, days) {
+  if (entries.length < 2) return null;
+  const last = entries[entries.length - 1];
+  const cutoff = bwT(last) - days * 86400000;
+  const base = [...entries].reverse().find((e) => bwT(e) <= cutoff) || entries[0];
+  if (base === last) return null;
+  return { diff: last.kg - base.kg, since: base.date };
+}
+
+const signed = (v) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${fmtNum(Math.abs(v))}`;
+
+function bwCard() {
+  const e = bwEntries();
+  const last = e[e.length - 1];
+  const ch = bwChange(e, 30);
+  return `
+    <section class="card bw-card">
+      <div class="row between">
+        <a class="bw-main" href="#/bodyweight">
+          <div class="muted small">Body weight</div>
+          ${last ? `<div class="bw-num">${fmtNum(last.kg)}<span>kg</span></div>
+            <div class="small muted">${esc(daysAgo(last.date + 'T12:00:00'))}${ch ? ` · ${signed(ch.diff)} kg in 30 days` : ''}</div>` : '<div class="small muted pad-top">Log your weight to see a trend.</div>'}
+        </a>
+        <button class="btn primary small-btn" data-act="bw-add">+ Log</button>
+      </div>
+      ${e.length >= 2 ? '<a href="#/bodyweight" class="bw-spark" id="bw-spark" aria-label="Body weight chart"></a>' : ''}
+    </section>`;
+}
+
+function drawBwSpark() {
+  const el = document.getElementById('bw-spark');
+  if (!el) return;
+  const pts = bwEntries().slice(-30).map((d) => ({ t: bwT(d), v: d.kg }));
+  const W = 300, H = 44;
+  const xs = pts.map((p) => p.t), ys = pts.map((p) => p.v);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs) || x0 + 1, y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const X = (t) => 4 + ((t - x0) / (x1 - x0 || 1)) * (W - 8);
+  const Y = (v) => H - 6 - ((v - y0) / (y1 - y0 || 1)) * (H - 12);
+  const path = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path class="spark" d="${path}"/></svg>`;
+}
+
+let bwRange = '3m';
+const BW_RANGES = [['1m', '1M', 31], ['3m', '3M', 92], ['1y', '1Y', 366], ['all', 'All', null]];
+
+function viewBodyweight() {
+  const e = bwEntries();
+  const last = e[e.length - 1];
+  const stat = (label, days) => {
+    const c = bwChange(e, days);
+    return `<div class="tile"><span class="tile-num">${c ? signed(c.diff) : '–'}</span><span class="tile-label">${label}</span></div>`;
+  };
+  const low = e.length ? Math.min(...e.map((d) => d.kg)) : null;
+  const high = e.length ? Math.max(...e.map((d) => d.kg)) : null;
+  return `
+    <a class="back" href="#/progress">‹ Progress</a>
+    <div class="row between"><h1 class="tight">Body weight</h1><button class="btn primary small-btn" data-act="bw-add">+ Log weight</button></div>
+    ${last ? `
+      <div class="hero card">
+        <div class="muted small">Latest · ${esc(fmtDate(last.date + 'T12:00:00', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }))}</div>
+        <div class="hero-num">${fmtNum(last.kg)}<span>kg</span></div>
+        <div class="muted small">Lowest ${fmtNum(low)} kg · Highest ${fmtNum(high)} kg · ${e.length} entr${e.length === 1 ? 'y' : 'ies'}</div>
+      </div>
+      <div class="tiles">${stat('7 days', 7)}${stat('30 days', 30)}${stat('90 days', 90)}</div>
+      <section class="card">
+        <div class="seg" role="tablist">${BW_RANGES.map(([k, l]) => `<button class="${k === bwRange ? 'on' : ''}" data-act="bw-range" data-range="${k}">${l}</button>`).join('')}</div>
+        <div class="chart-title small muted">Body weight (kg)</div>
+        <div id="chart"></div>
+      </section>
+      <h2>Entries</h2>
+      ${e.slice().reverse().map((d, i, arr) => {
+        const prev = arr[i + 1];
+        return `<button class="card list-row bw-row" data-act="bw-entry" data-id="${esc(d.id)}">
+          <span class="grow"><strong>${esc(fmtDate(d.date + 'T12:00:00', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }))}</strong></span>
+          <span class="right"><strong>${fmtNum(d.kg)} kg</strong>${prev ? `<span class="small muted block">${signed(d.kg - prev.kg)} kg</span>` : ''}</span>
+        </button>`;
+      }).join('')}
+    ` : '<p class="muted pad">No entries yet. Weigh yourself at the same time of day (e.g. in the morning) for the most consistent trend.</p>'}
+  `;
+}
+
+function drawBwChart() {
+  const el = document.getElementById('chart');
+  if (!el) return;
+  const days = BW_RANGES.find((r) => r[0] === bwRange)[2];
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const points = bwEntries().filter((d) => bwT(d) >= cutoff).map((d) => ({ t: bwT(d), v: d.kg }));
+  lineChart(el, [{ name: '', points }], { format: (v) => `${fmtNum(v)} kg`, markMax: false });
+}
+
+function openBwForm(entry) {
+  const last = bwEntries().slice(-1)[0];
+  openModal(`
+    <div class="sheet-title">${entry ? 'Edit entry' : 'Log body weight'}</div>
+    <form id="bw-form" class="pad" data-id="${esc(entry?.id || '')}">
+      <label class="field">Weight (kg)
+        <input name="kg" inputmode="decimal" autocomplete="off" required value="${entry ? esc(entry.kg) : ''}" placeholder="${last ? esc(last.kg) : 'e.g. 78.5'}" class="bw-input">
+      </label>
+      <label class="field">Date <input name="date" type="date" value="${esc(entry?.date || localDate())}" max="${localDate()}" required></label>
+      <div class="row gap"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-act="close-modal">Cancel</button></div>
+    </form>`);
+  setTimeout(() => document.querySelector('#bw-form [name=kg]')?.focus(), 60);
+}
+
+async function saveBw(form) {
+  const f = new FormData(form);
+  const kg = parseNum(f.get('kg'));
+  const date = String(f.get('date'));
+  if (!(kg > 0) || kg > 500 || !date) { toast('Enter a weight in kg'); return; }
+  const oldId = form.dataset.id;
+  const id = 'bw-' + date;
+  closeModal();
+  if (oldId && oldId !== id) await store.deleteDoc(store.getDoc(oldId));
+  await store.saveDoc({ id, type: 'bodyweight', date, kg: Math.round(kg * 10) / 10 });
+  toast(`Logged ${fmtNum(kg)} kg`);
 }
 
 // ================================================================ calisthenics
@@ -1226,6 +1352,15 @@ const ACTIONS = {
     renderRest();
   },
   'rest-skip': () => stopRest(),
+  'bw-add': () => openBwForm(),
+  'bw-range': (el) => { bwRange = el.dataset.range; renderMain(); },
+  'bw-entry': (el) => {
+    const d = store.getDoc(el.dataset.id);
+    actionSheet(`${fmtNum(d.kg)} kg · ${fmtDate(d.date + 'T12:00:00')}`, [
+      { label: 'Edit', run: () => openBwForm(d) },
+      { label: 'Delete', danger: true, run: () => store.deleteDoc(d) },
+    ]);
+  },
   'sync-now': () => sync(),
   export: () => exportData(),
 };
@@ -1283,6 +1418,7 @@ document.addEventListener('submit', async (evt) => {
   evt.preventDefault();
   const form = evt.target;
   if (form.id === 'gh-form') return saveGhForm(form);
+  if (form.id === 'bw-form') return saveBw(form);
   if (form.id === 'create-form') {
     const f = new FormData(form);
     const name = String(f.get('name')).trim();

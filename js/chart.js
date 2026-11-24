@@ -2,7 +2,7 @@
 // series: [{ name, points: [{ t, v, note? }] }] — one series, or Left/Right.
 import { esc, fmtNum, fmtDate } from './util.js';
 
-export function lineChart(container, series, { format = (v) => fmtNum(v) } = {}) {
+export function lineChart(container, series, { format = (v) => fmtNum(v), markMax = true } = {}) {
   series = series.filter((s) => s.points.length);
   const W = Math.max(280, container.clientWidth || 320);
   const H = 200;
@@ -40,7 +40,7 @@ export function lineChart(container, series, { format = (v) => fmtNum(v) } = {})
   const maxV = Math.max(...ys);
   const lines = series.map((s, k) => {
     const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
-    const dots = s.points.map((p) => `<circle class="dot s${k}${series.length === 1 && p.v === maxV ? ' best' : ''}" cx="${X(p.t)}" cy="${Y(p.v)}" r="4"/>`).join('');
+    const dots = s.points.map((p) => `<circle class="dot s${k}${markMax && series.length === 1 && p.v === maxV ? ' best' : ''}" cx="${X(p.t)}" cy="${Y(p.v)}" r="4"/>`).join('');
     return `<path class="line s${k}" d="${path}"/>${dots}`;
   }).join('');
 

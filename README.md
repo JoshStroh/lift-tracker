@@ -9,6 +9,7 @@ A gym log that runs as a home-screen app on iPhone. No App Store, no developer a
 - Quick-start Push / Pull / Legs / Abs & Stretch days that copy what you did last time
 - Each exercise shows **last time** and your **all-time best**; tick a set to start the rest timer
 - Progress charts (estimated 1RM, heaviest, volume), rep-max PRs, 🏆 badges for new records
+- **Body weight** log (kg) with a trend chart and 7 / 30 / 90-day change
 - Works offline; data is saved on the phone first, then synced to **your own private GitHub repo** as JSON
 
 ## How it is hosted
@@ -53,7 +54,7 @@ They open the same URL, add it to their home screen, and point Settings at **the
 - Every change is saved in the phone's IndexedDB immediately, so logging never waits on the network.
 - Sync runs when the app opens, when it comes back to the foreground, a few seconds after changes, and from **Sync now**.
 - Each sync pulls changed files, then pushes all local changes as **one commit**. If the same workout was edited on two devices, the newer edit wins.
-- Repo layout: `data/sessions/<date>-<id>.json` (one file per workout), `data/exercises/<id>.json` (custom exercises), `data/plans/<id>.json` (planned workouts) and `data/calisthenics/cali-progress.json` (track levels). They are readable JSON that you can edit or analyse.
+- Repo layout: `data/sessions/<date>-<id>.json` (one file per workout), `data/exercises/<id>.json` (custom exercises), `data/plans/<id>.json` (planned workouts) and `data/calisthenics/cali-progress.json` (track levels) and `data/bodyweight/bw-<date>.json` (body weight). They are readable JSON that you can edit or analyse.
 - **Settings → Export JSON** gives you a full backup file at any time.
 
 ## iPhone limitations

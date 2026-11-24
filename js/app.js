@@ -6,6 +6,7 @@ import * as cali from './cali.js';
 import * as gen from './generator.js';
 import { lineChart } from './chart.js';
 import { suggest, liveAdjust, RIR_LABEL } from './suggest.js';
+import * as habits from './habits.js';
 import { go, openModal, closeModal, actionSheet, runSheetAction, toast, thumb, visual, openInfo, infoHTML } from './ui.js';
 import { esc, uid, localDate, fmtNum, fmtDate, fmtTime, fmtDuration, fmtClock } from './util.js';
 
@@ -229,7 +230,7 @@ async function startCali() {
 async function newSession(name, meta, exercises) {
   if (store.activeSession()) { toast('Finish or discard the current workout first'); go('#/workout'); return; }
   const now = new Date().toISOString();
-  await store.saveDoc({ id: `${localDate()}-${uid()}`, type: 'session', name, dayId: meta.dayId || null, planId: meta.planId || null, startedAt: now, endedAt: null, notes: '', exercises });
+  await store.saveDoc({ id: `${localDate()}-${uid()}`, type: 'session', name, dayId: meta.dayId || null, planId: meta.planId || null, startedAt: now, endedAt: null, notes: '', tags: habits.defaultTags(), exercises });
   go('#/workout');
   window.scrollTo(0, 0);
 }
@@ -340,6 +341,7 @@ function viewEditor(s, editing) {
       </div>
       <button class="btn primary" data-act="${editing ? 'edit-done' : 'finish'}">${editing ? 'Done' : 'Finish'}</button>
     </div>
+    ${habitChips(s, true)}
     ${s.exercises.map((e, i) => exerciseBlock(s, e, i, editing)).join('')}
     <button class="btn wide" data-act="add-ex">+ Add exercise</button>
     <textarea class="notes" data-field="notes" placeholder="Workout notes" rows="2">${esc(s.notes || '')}</textarea>
@@ -502,6 +504,23 @@ async function finishWorkout() {
 
 // ================================================================ history
 
+function habitChips(s, editable) {
+  const t = s.tags;
+  if (!editable) {
+    if (!t) return '';
+    return `<div class="habits ro">${habits.HABITS.map((h) => `<span class="habit ${t[h.key] ? 'on' : ''}">${h.icon} ${esc(t[h.key] ? h.label : h.no)}</span>`).join('')}</div>`;
+  }
+  return `<div class="habits" role="group" aria-label="Before this workout">${habits.HABITS.map((h) => `
+    <button class="habit ${t?.[h.key] ? 'on' : ''}" data-act="habit" data-k="${h.key}" aria-pressed="${!!t?.[h.key]}">${h.icon} ${esc(h.label)}</button>`).join('')}
+  </div>`;
+}
+
+function habitIcons(s) {
+  if (!s.tags) return '';
+  const on = habits.HABITS.filter((h) => s.tags[h.key]).map((h) => h.icon).join('');
+  return on ? ` · ${on}` : '';
+}
+
 function sessionCard(s) {
   const dur = s.endedAt ? fmtDuration(new Date(s.endedAt) - new Date(s.startedAt)) : 'In progress';
   const vol = stats.sessionVolume(s);
@@ -509,7 +528,7 @@ function sessionCard(s) {
   return `
     <a class="card session-card" href="#/session/${encodeURIComponent(s.id)}">
       <div class="row between"><strong>${esc(s.name)}</strong><span class="muted small">${esc(fmtDate(s.startedAt))}</span></div>
-      <div class="muted small">${esc(dur)}${vol ? ` · ${fmtNum(vol)} kg volume` : ''}${prs ? ` · 🏆 ${prs} PR${prs > 1 ? 's' : ''}` : ''}</div>
+      <div class="muted small">${esc(dur)}${vol ? ` · ${fmtNum(vol)} kg volume` : ''}${prs ? ` · 🏆 ${prs} PR${prs > 1 ? 's' : ''}` : ''}${habitIcons(s)}</div>
       <div class="small ex-list">${s.exercises.map((e) => `${esc(store.exerciseName(e.exerciseId))} <span class="muted">×${e.sets.length}</span>`).join(', ')}</div>
     </a>`;
 }
@@ -553,6 +572,8 @@ function viewSession(id) {
       </div>
       <a class="btn" href="#/session/${encodeURIComponent(s.id)}/edit">Edit</a>
     </div>
+    ${habitChips(s, false)}
+    ${(() => { const p = habits.performanceIndex().get(s.id); if (!p) return ''; const d = (p.index - 1) * 100; return `<div class="card perf"><span class="muted small">Performance vs your recent norm</span><strong class="${d >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%</strong><span class="muted small">across ${p.n} lift${p.n > 1 ? 's' : ''}</span></div>`; })()}
     ${levelUpBanners(s.exercises.map((e) => e.exerciseId))}
     ${prs.size ? `<div class="card pr-banner">🏆 ${prs.size} personal record${prs.size > 1 ? 's' : ''} this workout</div>` : ''}
     ${s.exercises.map((e) => {
@@ -605,6 +626,7 @@ function viewProgress() {
       <div class="tile"><span class="tile-num">${finished.length}</span><span class="tile-label">All time</span></div>
     </div>
     ${bwCard()}
+    ${habitsCard()}
     <h2>Exercises</h2>
     <input class="search" id="progress-q" type="search" placeholder="Search your exercises" value="${esc(progressQuery)}" autocomplete="off">
     <div id="progress-list">${progressList()}</div>`;
@@ -704,6 +726,27 @@ function drawExerciseChart(id) {
   lineChart(el, series, { format });
 }
 
+
+// ================================================================ habits
+
+function habitsCard() {
+  const tagged = store.finishedSessions().filter((s) => s.tags).length;
+  if (!tagged) return '';
+  const rows = habits.compare();
+  return `
+    <section class="card habits-card">
+      <h3>Before-workout habits</h3>
+      <p class="muted small">Your performance score with vs without each habit. Each workout is scored against your own last 5 sessions of the same lifts, so different exercises and long-term progress don't skew it.</p>
+      ${rows.map((r) => `
+        <div class="habit-row">
+          <span class="habit-name">${r.icon} ${esc(r.label)}</span>
+          <span class="habit-val ${r.diff == null ? '' : r.clear ? (r.diff > 0 ? 'pos' : 'neg') : 'flat'}">${r.diff == null ? '—' : `${r.diff >= 0 ? '+' : '−'}${Math.abs(r.diff).toFixed(1)}%`}</span>
+          <span class="small muted habit-n">${r.yes} with · ${r.no} without</span>
+          <span class="small habit-verdict">${esc(r.verdict)}</span>
+        </div>`).join('')}
+      <p class="muted small">Creatine works by building up in your muscles over weeks, so missing one dose shouldn't affect that day. Caffeine has a real short-term effect (a few % in strength studies).</p>
+    </section>`;
+}
 
 // ================================================================ body weight
 
@@ -1433,6 +1476,13 @@ const ACTIONS = {
       const v = sg.sets[j] || sg.sets[sg.sets.length - 1];
       for (const [k, val] of Object.entries(v)) if (st[k] == null) st[k] = val;
     });
+    await store.saveDoc(s);
+  },
+  habit: async (el) => {
+    const s = editingSession();
+    if (!s) return;
+    s.tags = { ...habits.defaultTags(), ...(s.tags || {}) };
+    s.tags[el.dataset.k] = !s.tags[el.dataset.k];
     await store.saveDoc(s);
   },
   'sync-now': () => sync(),

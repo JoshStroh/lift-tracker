@@ -463,3 +463,18 @@ h2.inline { margin: 14px 4px 8px; }
 .live-note { font-size: 13px; font-weight: 600; padding: 6px 9px; border-radius: 9px; margin: 2px 0; background: var(--surface-2); }
 .live-note.up { color: var(--done-ink); }
 .live-note.down { color: var(--gold); }
+
+/* habits */
+.habits { display: flex; gap: 6px; margin: -4px 0 12px; flex-wrap: wrap; }
+.habit { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 11px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
+.habit.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.habits.ro { margin: 0 0 10px; }
+.habits.ro .habit { font-size: 12px; padding: 3px 9px; }
+.perf { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.perf strong { font-size: 20px; }
+.pos { color: var(--done-ink); } .neg { color: var(--danger); } .flat { color: var(--muted); }
+.habit-row { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; padding: 9px 0; border-top: 1px solid var(--border); }
+.habit-name { font-weight: 700; }
+.habit-val { font-weight: 800; text-align: right; }
+.habit-n { grid-column: 1 / -1; }
+.habit-verdict { grid-column: 1 / -1; }

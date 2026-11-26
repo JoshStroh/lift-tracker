@@ -9,7 +9,7 @@ export const DAY_TEMPLATES = [
   { id: 'rt-push', name: 'Push', exercises: ['Bench Press', 'Overhead Press', 'Incline Dumbbell Press', 'Lateral Raise', 'Triceps Pushdown', 'Overhead Triceps Extension'] },
   { id: 'rt-pull', name: 'Pull', exercises: ['Deadlift', 'Lat Pulldown', 'Seated Cable Row', 'Face Pull', 'Dumbbell Curl', 'Hammer Curl'] },
   { id: 'rt-legs', name: 'Legs', exercises: ['Squat', 'Romanian Deadlift', 'Leg Press', 'Leg Curl', 'Leg Extension', 'Calf Raise'] },
-  { id: 'rt-abs', name: 'Abs & Stretch', exercises: ['Plank', 'Hanging Leg Raise', 'Cable Crunch', 'Hamstring Stretch', 'Hip Flexor Stretch', 'Pigeon Stretch'] },
+  { id: 'rt-abs', name: 'Core & Recovery', exercises: ['Plank', 'Hanging Leg Raise', 'Cable Crunch', 'Hamstring Stretch', 'Hip Flexor Stretch', 'Pigeon Stretch'] },
 ].map((t) => ({ ...t, exercises: t.exercises.map(exId) }));
 
 // ---------- search ----------

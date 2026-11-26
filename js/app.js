@@ -241,7 +241,7 @@ async function newSession(name, meta, exercises) {
 let wiz = null;
 
 function openWizard(mode, date) {
-  wiz = { mode, dayType: wiz?.dayType || 'push', style: wiz?.style || 'conventional', length: wiz?.length || 'normal', date: date ?? (selectedDay && selectedDay !== localDate() ? selectedDay : localDate()) };
+  wiz = { mode, dayType: wiz?.dayType || 'push', style: wiz?.style || 'conventional', length: wiz?.length || 'normal', areas: wiz?.areas || [...gen.DEFAULT_AREAS], date: date ?? (selectedDay && selectedDay !== localDate() ? selectedDay : localDate()) };
   renderWizard();
 }
 
@@ -257,7 +257,12 @@ function renderWizard() {
     <div class="choices three">${chips('dayType', gen.DAY_TYPES)}</div>
     ${wiz.dayType === 'stretch' ? '' : `<h4>Style</h4><div class="choices three">${chips('style', gen.STYLES)}</div>`}
     ${wiz.style !== 'conventional' && wiz.dayType !== 'stretch' && !Object.keys(cali.progress().levels || {}).length ? '<p class="small note">Tip: set your level on each track in the <strong>Calisthenics</strong> tab first, so bodyweight exercises match what you can do.</p>' : ''}
-    ${wiz.mode === 'auto' ? `<h4>Length</h4><div class="choices three">${chips('length', gen.LENGTHS.map((l) => ({ ...l, blurb: `${l.n} exercises` })))}</div>` : ''}
+    ${wiz.dayType === 'stretch' ? `
+      <h4>Focus areas <span class="muted small normal">pick any</span></h4>
+      <div class="presets">${gen.AREA_PRESETS.map((p) => `<button class="chip-btn ${p.areas.length === wiz.areas.length && p.areas.every((a) => wiz.areas.includes(a)) ? 'on' : ''}" data-act="wiz-preset" data-id="${p.id}">${esc(p.label)}</button>`).join('')}</div>
+      <div class="choices areas">${gen.AREAS.map((a) => `<button class="choice slim ${wiz.areas.includes(a.id) ? 'on' : ''}" data-act="wiz-area" data-id="${a.id}" aria-pressed="${wiz.areas.includes(a.id)}">${wiz.areas.includes(a.id) ? '✓ ' : ''}${esc(a.label)}</button>`).join('')}</div>
+      ${wiz.mode === 'auto' ? `<p class="small muted">About ${Math.max(1, Math.round(gen.generateRecovery(wiz.areas).reduce((t, e) => t + (e.target === '60s' ? 60 * (e.sides ? 2 : 1) : 30 * e.sets * (e.sides ? 2 : 1)), 0) / 60))} min: rolling first (~60 s per area), then stretches held 2 × 30 s.</p>` : ''}` : ''}
+    ${wiz.mode === 'auto' && wiz.dayType !== 'stretch' ? `<h4>Length</h4><div class="choices three">${chips('length', gen.LENGTHS.map((l) => ({ ...l, blurb: `${l.n} exercises` })))}</div>` : ''}
     <h4>When?</h4>
     <div class="row gap when">
       <input type="date" id="wiz-date" value="${esc(wiz.date || '')}" min="${localDate()}">
@@ -270,9 +275,11 @@ function renderWizard() {
 async function createFromWizard() {
   const d = document.getElementById('wiz-date')?.value;
   if (d !== undefined) wiz.date = d || null;
-  const exercises = wiz.mode === 'auto' ? gen.generate(wiz) : [];
+  const recovery = wiz.dayType === 'stretch';
+  if (recovery && !wiz.areas.length) { toast('Pick at least one area'); return; }
+  const exercises = wiz.mode !== 'auto' ? [] : recovery ? gen.generateRecovery(wiz.areas) : gen.generate(wiz);
   const plan = {
-    id: 'pl-' + uid(), type: 'plan', name: gen.planName(wiz.dayType, wiz.style), dayId: wiz.dayType,
+    id: 'pl-' + uid(), type: 'plan', name: recovery ? gen.recoveryName(wiz.areas) : gen.planName(wiz.dayType, wiz.style), dayId: wiz.dayType, areas: recovery ? [...wiz.areas] : undefined,
     style: wiz.dayType === 'stretch' ? 'mixed' : wiz.style, date: wiz.date || null, exercises, generated: wiz.mode === 'auto', createdAt: new Date().toISOString(),
   };
   closeModal();
@@ -1155,6 +1162,7 @@ let pick = { mode: null, query: '', cat: 'All' };
 function suggestFor(mode) {
   if (mode.type.startsWith('plan')) {
     const p = store.getDoc(mode.planId);
+    if (p?.dayId === 'stretch' && p.areas?.length) return { label: `Suggested for ${p.name}`, list: gen.recoverySuggestions(p.areas) };
     if (p?.dayId && gen.DAY_PATTERNS[p.dayId]) return { label: `Suggested for ${p.name}`, list: gen.suggestions(p.dayId, p.style || 'mixed') };
   }
   return null;
@@ -1373,6 +1381,17 @@ const ACTIONS = {
   'start-plan': (el) => startPlan(el.dataset.id),
   'pick-day': (el) => { selectedDay = el.dataset.day; renderMain(); },
   wizard: (el) => openWizard(el.dataset.mode, el.dataset.date),
+  'wiz-area': (el) => {
+    const id = el.dataset.id;
+    wiz.areas = wiz.areas.includes(id) ? wiz.areas.filter((a) => a !== id) : [...wiz.areas, id];
+    const d = document.getElementById('wiz-date')?.value; if (d !== undefined) wiz.date = d || null;
+    renderWizard();
+  },
+  'wiz-preset': (el) => {
+    wiz.areas = [...gen.AREA_PRESETS.find((p) => p.id === el.dataset.id).areas];
+    const d = document.getElementById('wiz-date')?.value; if (d !== undefined) wiz.date = d || null;
+    renderWizard();
+  },
   'wiz-set': (el) => { wiz[el.dataset.field] = el.dataset.val; const d = document.getElementById('wiz-date')?.value; if (d !== undefined) wiz.date = d || null; renderWizard(); },
   'wiz-nodate': () => { wiz.date = null; renderWizard(); },
   'wiz-create': () => createFromWizard(),
@@ -1480,7 +1499,7 @@ const ACTIONS = {
   },
   'plan-regen': async () => {
     const p = editingPlan();
-    p.exercises = gen.generate({ dayType: p.dayId, style: p.style, length: p.exercises.length <= 4 ? 'short' : p.exercises.length >= 8 ? 'long' : 'normal' });
+    p.exercises = p.dayId === 'stretch' && p.areas?.length ? gen.generateRecovery(p.areas) : gen.generate({ dayType: p.dayId, style: p.style, length: p.exercises.length <= 4 ? 'short' : p.exercises.length >= 8 ? 'long' : 'normal' });
     await store.saveDoc(p);
   },
   'plan-save': () => { const p = editingPlan(); toast(p.date ? `Saved for ${dayLabel(p.date)}` : 'Saved to your plans'); if (p.date) selectedDay = p.date; go('#/workout'); },

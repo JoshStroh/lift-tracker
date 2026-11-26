@@ -83,6 +83,7 @@ const pctStr = (a, b) => `${Math.round(((b - a) / a) * 100)}%`;
 // entry: the exercise inside the workout/plan ({ sets, target, track, sides }); session: to exclude itself.
 export function suggest(exerciseId, entry = {}, session = null) {
   const ex = store.getExercise(exerciseId);
+  if (ex.category === 'Recovery' || ex.pattern === 'cardio') return null; // no 'progression' for recovery or cardio
   const kind = ex.kind || 'weight';
   const nSets = Math.max(1, entry.sets?.length ?? entry.sets ?? 3);
   const range = rangeFor(ex, entry);

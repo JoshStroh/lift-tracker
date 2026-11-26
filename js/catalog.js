@@ -12,7 +12,7 @@
 //
 // IDs are derived from the name, so never rename an existing exercise (it would orphan history).
 
-export const CATEGORIES = ['Chest', 'Back', 'Shoulders', 'Arms', 'Legs', 'Core', 'Calisthenics', 'Stretch', 'Cardio', 'Other'];
+export const CATEGORIES = ['Chest', 'Back', 'Shoulders', 'Arms', 'Legs', 'Core', 'Calisthenics', 'Recovery', 'Cardio', 'Other'];
 export const KINDS = { weight: 'Weight × reps', reps: 'Reps only', time: 'Time' };
 export const EQUIPMENT = {
   bb: 'Barbell', db: 'Dumbbell', cb: 'Cable', mc: 'Machine', sm: 'Smith machine', kb: 'Kettlebell', bd: 'Band',
@@ -320,7 +320,32 @@ const DATA = {
     ['Burpee', 'bw', 'reps', 'cardio', 'pose:burpee', 'burpees', 'L1'],
     ['Bear Crawl', 'bw', 'time', 'cardio', 'pose:bear', 'crawl', 'L1'],
   ],
-  Stretch: [
+  Recovery: [
+    // Quick whole-routine entries: log one item with the total time instead of every stretch.
+    ['Full Body Stretch', 'bw', 'time', 'recovery', 'Worlds_Greatest_Stretch', 'stretching routine whole body general stretch'],
+    ['Lower Body Stretch', 'bw', 'time', 'recovery', 'Hamstring_Stretch', 'legs stretching routine hips hamstrings quads calves'],
+    ['Upper Body Stretch', 'bw', 'time', 'recovery', 'Chest_And_Front_Of_Shoulder_Stretch', 'arms chest stretching routine'],
+    ['Shoulder Mobility', 'bw', 'time', 'recovery', 'Shoulder_Circles', 'shoulders stretch stretching routine rotator cuff'],
+    ['Hip Mobility', 'bw', 'time', 'recovery', 'Standing_Hip_Circles', 'hips stretch stretching routine'],
+    ['Back Stretch', 'bw', 'time', 'recovery', 'Childs_Pose', 'lower back upper back spine stretching routine'],
+    ['Yoga / Mobility Flow', 'bw', 'time', 'recovery', 'pose:pike', 'yoga flow mobility routine'],
+    // Foam roller and massage ball
+    ['Foam Roll – Full Body', 'other', 'time', 'foamroll', 'Quadriceps-SMR', 'foam rolling roller smr myofascial'],
+    ['Foam Roll – Quads', 'other', 'time', 'foamroll', 'Quadriceps-SMR', 'foam rolling roller legs thighs'],
+    ['Foam Roll – Hamstrings', 'other', 'time', 'foamroll', 'Hamstring-SMR', 'foam rolling roller legs'],
+    ['Foam Roll – Calves', 'other', 'time', 'foamroll', 'Calves-SMR', 'foam rolling roller legs'],
+    ['Foam Roll – IT Band', 'other', 'time', 'foamroll', 'Iliotibial_Tract-SMR', 'foam rolling roller outer thigh itb'],
+    ['Foam Roll – Adductors', 'other', 'time', 'foamroll', 'Adductor', 'foam rolling roller inner thigh groin'],
+    ['Foam Roll – Glutes', 'other', 'time', 'foamroll', 'Piriformis-SMR', 'foam rolling roller piriformis hips'],
+    ['Foam Roll – Upper Back', 'other', 'time', 'foamroll', 'Rhomboids-SMR', 'foam rolling roller thoracic spine'],
+    ['Foam Roll – Lats', 'other', 'time', 'foamroll', 'Latissimus_Dorsi-SMR', 'foam rolling roller back'],
+    ['Foam Roll – Lower Back', 'other', 'time', 'foamroll', 'Lower_Back-SMR', 'foam rolling roller'],
+    ['Massage Ball – Feet', 'other', 'time', 'foamroll', 'Foot-SMR', 'lacrosse ball tennis ball rolling plantar'],
+    ['Massage Ball – Glutes', 'other', 'time', 'foamroll', 'Piriformis-SMR', 'lacrosse ball tennis ball rolling piriformis hips'],
+    ['Massage Ball – Shoulders & Upper Back', 'other', 'time', 'foamroll', 'Rhomboids-SMR', 'lacrosse ball tennis ball rolling traps rear delt'],
+    ['Massage Ball – Chest', 'other', 'time', 'foamroll', '', 'lacrosse ball tennis ball rolling pecs'],
+    ['Massage Gun', 'other', 'time', 'foamroll', '', 'percussion theragun hypervolt'],
+    // Individual stretches
     ['Hamstring Stretch', 'bw', 'time', 'stretch', 'Hamstring_Stretch', 'hamstrings'],
     ['Seated Forward Fold', 'bw', 'time', 'stretch', 'Seated_Floor_Hamstring_Stretch', 'pike stretch toe touch'],
     ['Hip Flexor Stretch', 'bw', 'time', 'stretch', 'Kneeling_Hip_Flexor', 'couch stretch lunge stretch', 's'],

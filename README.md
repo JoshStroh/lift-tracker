@@ -13,6 +13,7 @@ A gym log that runs as a home-screen app on iPhone. No App Store, no developer a
 - Progress charts (estimated 1RM, heaviest, volume), rep-max PRs, 🏆 badges for new records
 - **Personal records page** (Progress → 🏆): latest PRs with how much you improved, and all-time bests for every exercise, searchable and filterable by muscle group
 - **Before-workout habits** (☕ coffee, 💊 creatine, 🍽️ fasted): one-tap chips that copy your last workout, plus a performance comparison on the Progress tab (each workout scored against your own recent sessions of the same lifts; it says when a difference is just normal variation)
+- **Recovery** category (formerly Stretch): quick whole-routine entries (lower body, upper body, shoulders, hips, back, full body, yoga flow), foam roller and massage ball work, plus individual stretches; logged by time and left out of PRs and progression suggestions
 - **Body weight** log (kg) with a trend chart and 7 / 30 / 90-day change
 - Works offline; data is saved on the phone first, then synced to **your own private GitHub repo** as JSON
 

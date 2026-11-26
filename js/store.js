@@ -92,15 +92,17 @@ export async function setLastSync(iso) {
 
 // ---------- derived data ----------
 
+const normCat = (e) => (e && e.category === 'Stretch' ? { ...e, category: 'Recovery' } : e);
+
 export function exercises() {
-  const custom = docs('exercise');
+  const custom = docs('exercise').map(normCat);
   return [...BUILTIN_EXERCISES, ...custom].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const BUILTIN_BY_ID = new Map(BUILTIN_EXERCISES.map((e) => [e.id, e]));
 
 export function getExercise(id) {
-  return BUILTIN_BY_ID.get(id) || getDoc(id) || { id, name: 'Unknown exercise', kind: 'weight', category: 'Other', photo: '' };
+  return BUILTIN_BY_ID.get(id) || normCat(getDoc(id)) || { id, name: 'Unknown exercise', kind: 'weight', category: 'Other', photo: '' };
 }
 
 export const exerciseName = (id) => getExercise(id).name;

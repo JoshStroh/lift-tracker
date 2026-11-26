@@ -22,7 +22,7 @@ const norm = (s) =>
     .map((w) => (w.length > 2 && !w.endsWith('ss') ? w.replace(/s$/, '') : w));
 
 const CATEGORY_WORDS = {
-  Core: 'core abs abdominal', Stretch: 'stretch stretching mobility flexibility', Legs: 'legs quads hamstrings glutes',
+  Core: 'core abs abdominal', Recovery: 'recovery stretch stretching mobility flexibility foam roll rolling roller massage ball cooldown', Legs: 'legs quads hamstrings glutes',
   Arms: 'arms biceps triceps', Back: 'back lats', Chest: 'chest pecs', Shoulders: 'shoulders delts',
   Calisthenics: 'calisthenics bodyweight cali street workout skill',
 };
@@ -55,7 +55,7 @@ export function searchExercises(all, query) {
       else if (words.some((n) => n.startsWith(w)) || (w.length >= 4 && joined.includes(w))) score += 1;
       else { ok = false; break; }
     }
-    const offTopic = (ex.category === 'Stretch' || ex.category === 'Cardio') && !q.some((w) => w.startsWith('stretch') || w === 'cardio');
+    const offTopic = (ex.category === 'Recovery' || ex.category === 'Cardio') && !q.some((w) => /^(stretch|recover|foam|roll|massage|mobil|yoga|cardio)/.test(w));
     if (ok) scored.push({ ex, score: score + (nameWords[0]?.startsWith(q[0]) ? 1 : 0) - (nameWords.length > q.length + 2 ? 0.5 : 0) - (offTopic ? 1.5 : 0) });
   }
   return scored.sort((a, b) => b.score - a.score || a.ex.name.length - b.ex.name.length || a.ex.name.localeCompare(b.ex.name)).map((s) => s.ex);

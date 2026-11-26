@@ -1,6 +1,6 @@
 // Offline support: serve the app from cache, refresh the cache in the background.
 // Bump VERSION when files are added/removed.
-const VERSION = 'v8';
+const VERSION = 'v9';
 const CACHE = `lift-tracker-${VERSION}`;
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',

@@ -14,7 +14,7 @@ export const DAY_TYPES = [
   { id: 'pull', name: 'Pull', blurb: 'Back, biceps, rear delts' },
   { id: 'legs', name: 'Legs', blurb: 'Quads, hamstrings, glutes, calves' },
   { id: 'core', name: 'Core & Abs', blurb: 'Abs, obliques, lower back' },
-  { id: 'stretch', name: 'Stretch', blurb: 'Mobility and flexibility' },
+  { id: 'stretch', name: 'Recovery', blurb: 'Stretching, mobility, foam rolling' },
   { id: 'full', name: 'Full body', blurb: 'A bit of everything' },
 ];
 export const STYLES = [
@@ -33,7 +33,7 @@ const SLOTS = {
   pull: ['vpull', 'hpull', 'vpull', 'reardelt', 'bi', 'hpull', 'bi', 'shrug'],
   legs: ['squat', 'hinge', 'lunge', 'quadiso', 'hamiso', 'calf', 'glute', 'squat'],
   core: ['antiext', 'hang', 'rot', 'abs', 'backext', 'antiext', 'rot', 'abs'],
-  stretch: ['stretch', 'stretch', 'stretch', 'stretch', 'stretch', 'stretch', 'stretch', 'stretch'],
+  stretch: ['foamroll', 'stretch', 'stretch', 'stretch', 'stretch', 'stretch', 'stretch', 'stretch'],
   full: ['squat', 'hpush', 'vpull', 'hinge', 'vpush', 'hpull', 'antiext', 'lunge'],
 };
 // Which patterns belong to which day (used for suggestions in "Build my own").
@@ -42,7 +42,7 @@ export const DAY_PATTERNS = {
   pull: ['vpull', 'hpull', 'reardelt', 'bi', 'shrug', 'forearm'],
   legs: ['squat', 'hinge', 'lunge', 'quadiso', 'hamiso', 'calf', 'glute'],
   core: ['antiext', 'hang', 'rot', 'abs', 'backext'],
-  stretch: ['stretch'],
+  stretch: ['recovery', 'foamroll', 'stretch'],
   full: ['squat', 'hinge', 'hpush', 'vpush', 'vpull', 'hpull', 'antiext', 'lunge'],
 };
 // Calisthenics: the track to use for a slot the first time it appears.
@@ -94,6 +94,7 @@ export function candidates(pattern, style, { exclude = new Set() } = {}) {
 
 function targetFor(ex, slotIndex, style, trackStep) {
   if (trackStep) return { sets: 3, target: cali.stdTarget(trackStep.std) };
+  if (ex.pattern === 'foamroll' || ex.pattern === 'recovery') return { sets: 1, target: '5 min' };
   if (ex.kind === 'time') return { sets: ex.pattern === 'stretch' ? 2 : 3, target: ex.pattern === 'stretch' ? '30s' : '30–45s' };
   if (ex.kind === 'reps') return { sets: 3, target: ex.level >= 3 ? '5–8' : '8–15' };
   if (COMPOUND.has(ex.pattern) && slotIndex < 2) return { sets: 4, target: '5–8' };

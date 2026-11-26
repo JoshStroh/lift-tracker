@@ -213,7 +213,7 @@ export function allPRs() {
     for (const e of s.exercises) {
       const ex = store.getExercise(e.exerciseId);
       const kind = ex.kind || 'weight';
-      if (ex.pattern === 'stretch') continue;
+      if (ex.category === 'Recovery' || ex.pattern === 'cardio') continue;
       const sets = e.sets.filter((x) => isValidSet(kind, x));
       if (!sets.length) continue;
       let b = bests.get(e.exerciseId);

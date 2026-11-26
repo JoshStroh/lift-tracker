@@ -39,7 +39,7 @@ export function performanceIndex() {
       if (seen.has(e.exerciseId)) continue;
       seen.add(e.exerciseId);
       const ex = store.getExercise(e.exerciseId);
-      if (ex.kind === 'time' || ex.pattern === 'stretch' || ex.pattern === 'cardio') continue;
+      if (ex.kind === 'time' || ex.category === 'Recovery' || ex.pattern === 'cardio') continue;
       const best = stats.bestSet(ex.kind, e.sets);
       if (!best) continue;
       const sc = stats.score(ex.kind, best);

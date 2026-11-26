@@ -323,7 +323,7 @@ function planRow(p, e, i) {
           <span class="muted">${unit}${e.sides ? ' each side' : ''}</span>
         </div>
         ${e.track ? `<div class="small muted">🤸 ${esc(cali.getTrack(e.track)?.name || '')} track</div>` : ''}
-        ${(() => { if (store.state.settings.suggest === false) return ''; const sg = suggest(e.exerciseId, { sets: e.sets || 3, target: e.target, track: e.track, sides: e.sides }); return sg.action === 'first' ? '' : `<div class="small sugg-line">💡 Next time: <strong>${esc(sg.title)}</strong></div>`; })()}
+        ${(() => { if (store.state.settings.suggest === false) return ''; const sg = suggest(e.exerciseId, { sets: e.sets || 3, target: e.target, track: e.track, sides: e.sides }); return !sg || sg.action === 'first' ? '' : `<div class="small sugg-line">💡 Next time: <strong>${esc(sg.title)}</strong></div>`; })()}
       </div>
     </div>`;
 }
@@ -684,7 +684,7 @@ function viewExercise(id) {
     </div>
     ${hist.length ? `
       ${hero}
-      ${(() => { const sg = suggest(id, {}); return `<div class="card sugg-card"><div class="muted small">💡 Suggested next session</div><strong>${esc(sg.title)}</strong><p class="small">${esc(sg.reason)}</p></div>`; })()}
+      ${(() => { const sg = suggest(id, {}); if (!sg) return ''; return `<div class="card sugg-card"><div class="muted small">💡 Suggested next session</div><strong>${esc(sg.title)}</strong><p class="small">${esc(sg.reason)}</p></div>`; })()}
       ${imb ? `<div class="card"><strong>Left vs right</strong><div class="small">${esc(stats.imbalanceText(imb))} <span class="muted">(last time it was tracked)</span></div></div>` : ''}
       <section class="card">
         <div class="seg" role="tablist">
@@ -1204,7 +1204,14 @@ function pickerList() {
     if (!sug || pick.cat !== 'All') {
       for (const c of CATEGORIES) {
         const items = all.filter((e) => (e.category || 'Other') === c);
-        if (items.length) html += `<div class="pick-group">${esc(c)}</div>${items.map(pickRow).join('')}`;
+        if (!items.length) continue;
+        if (c === 'Recovery') {
+          // quick whole-routine entries first, then rolling, then individual stretches
+          const grp = (label, list) => (list.length ? `<div class="pick-group">${label}</div>${list.map(pickRow).join('')}` : '');
+          html += grp('Recovery · quick routines', items.filter((e) => e.pattern === 'recovery'))
+            + grp('Recovery · foam roller & ball', items.filter((e) => e.pattern === 'foamroll'))
+            + grp('Recovery · individual stretches', items.filter((e) => e.pattern !== 'recovery' && e.pattern !== 'foamroll'));
+        } else html += `<div class="pick-group">${esc(c)}</div>${items.map(pickRow).join('')}`;
       }
     } else html += '<div class="pick-group">Search above or pick a category for everything else</div>';
     return html;
@@ -1543,6 +1550,7 @@ const ACTIONS = {
     const i = +el.dataset.ex;
     const e = s.exercises[i];
     const sg = suggest(e.exerciseId, e, s);
+    if (!sg) return;
     openModal(`
       <div class="info-head"><span></span><button class="link-btn" data-act="close-modal">Close</button></div>
       <h2 class="info-title">💡 ${esc(store.exerciseName(e.exerciseId))}</h2>
@@ -1556,7 +1564,7 @@ const ACTIONS = {
     const e = s.exercises[+el.dataset.ex];
     const sg = suggest(e.exerciseId, e, s);
     closeModal();
-    if (!sg.sets) return;
+    if (!sg?.sets) return;
     e.sets.forEach((st, j) => {
       if (st.done) return;
       const v = sg.sets[j] || sg.sets[sg.sets.length - 1];

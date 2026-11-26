@@ -36,7 +36,7 @@ function render() {
   renderMain();
 }
 
-const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali', bodyweight: 'progress' };
+const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali', bodyweight: 'progress', prs: 'progress' };
 
 function renderMain() {
   const r = route();
@@ -49,6 +49,7 @@ function renderMain() {
     case 'session': main.innerHTML = r.sub === 'edit' ? viewEditor(store.getDoc(r.id), true) : viewSession(r.id); break;
     case 'progress': main.innerHTML = viewProgress(); drawBwSpark(); break;
     case 'bodyweight': main.innerHTML = viewBodyweight(); drawBwChart(); break;
+    case 'prs': main.innerHTML = viewPRs(); break;
     case 'exercise': main.innerHTML = viewExercise(r.id); drawExerciseChart(r.id); break;
     case 'plan': main.innerHTML = viewPlan(r.id); break;
     case 'cali': main.innerHTML = viewCali(); break;
@@ -625,6 +626,7 @@ function viewProgress() {
       <div class="tile"><span class="tile-num">${inMonth}</span><span class="tile-label">This month</span></div>
       <div class="tile"><span class="tile-num">${finished.length}</span><span class="tile-label">All time</span></div>
     </div>
+    ${prCard()}
     ${bwCard()}
     ${habitsCard()}
     <h2>Exercises</h2>
@@ -726,6 +728,89 @@ function drawExerciseChart(id) {
   lineChart(el, series, { format });
 }
 
+
+// ================================================================ personal records
+
+const monthAgo = () => Date.now() - 30 * 86400000;
+
+function prImprovement(ev) {
+  if (ev.prev == null || !isFinite(ev.prev)) return '';
+  const d = ev.score - ev.prev;
+  if (ev.kind === 'weight') return `+${fmtNum(d)} kg est. 1RM`;
+  if (ev.kind === 'reps') return `+${fmtNum(d)} rep${d === 1 ? '' : 's'}`;
+  return `+${stats.fmtSec(d)}`;
+}
+
+function prCard() {
+  const { events, bests } = stats.allPRs();
+  if (!bests.size) return '';
+  const recent = events.filter((e) => new Date(e.session.startedAt) >= monthAgo()).length;
+  const last = events[events.length - 1];
+  return `
+    <a class="card pr-link" href="#/prs">
+      <span class="pr-trophy">🏆</span>
+      <span class="grow"><strong>Personal records</strong>
+        <span class="small muted block">${recent} in the last 30 days · ${events.length} all time${last ? ` · latest: ${esc(store.exerciseName(last.exerciseId))} ${esc(stats.shortLabel(last.kind, last.set))}` : ''}</span></span>
+      <span class="chev">›</span>
+    </a>`;
+}
+
+let prQuery = '';
+let prCat = 'All';
+
+function viewPRs() {
+  const { events, bests } = stats.allPRs();
+  const recent = events.filter((e) => new Date(e.session.startedAt) >= monthAgo());
+  const cats = ['All', ...CATEGORIES.filter((c) => [...bests.keys()].some((id) => (store.getExercise(id).category || 'Other') === c))];
+  return `
+    <a class="back" href="#/progress">‹ Progress</a>
+    <h1 class="tight">🏆 Personal records</h1>
+    <p class="muted small">A PR is a set that beats every earlier session of that exercise — the best estimated 1-rep max for weighted lifts, most reps for bodyweight moves, longest hold for timed ones.</p>
+    <div class="tiles">
+      <div class="tile"><span class="tile-num">${recent.length}</span><span class="tile-label">Last 30 days</span></div>
+      <div class="tile"><span class="tile-num">${events.length}</span><span class="tile-label">All time</span></div>
+      <div class="tile"><span class="tile-num">${bests.size}</span><span class="tile-label">Exercises</span></div>
+    </div>
+    ${events.length ? `<h2>Latest PRs</h2>${events.slice(-8).reverse().map((ev) => {
+      const ex = store.getExercise(ev.exerciseId);
+      return `<a class="card list-row" href="#/exercise/${encodeURIComponent(ex.id)}">
+        ${thumb(ex, 'thumb sm')}
+        <span class="grow"><strong>${esc(ex.name)}</strong><span class="small muted block">${esc(fmtDate(ev.session.startedAt, { day: 'numeric', month: 'short', year: 'numeric' }))}</span></span>
+        <span class="right"><strong>${esc(stats.setLabel(ev.kind, ev.set))}</strong><span class="small pos block">${esc(prImprovement(ev))}</span></span>
+      </a>`;
+    }).join('')}` : '<p class="muted small pad">Your first session of each exercise sets the baseline — beat it next time for your first PR.</p>'}
+    <h2>All-time bests</h2>
+    <input class="search" id="pr-q" type="search" placeholder="Search exercises" value="${esc(prQuery)}" autocomplete="off">
+    <div class="cat-chips">${cats.map((c) => `<button class="chip-btn ${prCat === c ? 'on' : ''}" data-act="pr-cat" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    <div id="pr-list">${prList()}</div>
+  `;
+}
+
+function prList() {
+  const { bests } = stats.allPRs();
+  let items = [...bests.entries()].map(([id, b]) => ({ ex: store.getExercise(id), b }));
+  if (prCat !== 'All') items = items.filter((i) => (i.ex.category || 'Other') === prCat);
+  if (prQuery.trim()) {
+    const order = searchExercises(items.map((i) => i.ex), prQuery).map((e) => e.id);
+    items = order.map((id) => items.find((i) => i.ex.id === id));
+  } else {
+    items.sort((a, b) => (b.b.bestSession?.startedAt || '').localeCompare(a.b.bestSession?.startedAt || ''));
+  }
+  if (!items.length) return '<p class="muted pad">No matches.</p>';
+  return items.map(({ ex, b }) => {
+    const kind = b.kind;
+    const head = kind === 'weight' ? `${fmtNum(b.bestScore)} kg` : kind === 'reps' ? `${b.bestScore} reps` : stats.fmtSec(b.bestScore);
+    const headLabel = kind === 'weight' ? 'est. 1RM' : kind === 'reps' ? 'best set' : 'longest hold';
+    const heavy = kind === 'weight' && b.heaviestSet && b.heaviestSet !== b.best ? ` · heaviest ${fmtNum(b.heaviest)} kg × ${b.heaviestSet.reps}` : '';
+    return `<a class="card list-row" href="#/exercise/${encodeURIComponent(ex.id)}">
+      ${thumb(ex, 'thumb sm')}
+      <span class="grow"><strong>${esc(ex.name)}</strong>
+        <span class="small muted block">${esc(stats.setLabel(kind, b.best))}${esc(heavy)}</span>
+        <span class="small muted block">${esc(fmtDate(b.bestSession.startedAt, { day: 'numeric', month: 'short', year: 'numeric' }))} · ${b.sessions} session${b.sessions > 1 ? 's' : ''}</span></span>
+      <span class="right"><strong class="pr-head">${esc(head)}</strong><span class="small muted block">${headLabel}</span></span>
+    </a>`;
+  }).join('');
+}
 
 // ================================================================ habits
 
@@ -1335,6 +1420,7 @@ const ACTIONS = {
   'add-ex': () => openPicker({ type: 'add' }),
   'close-modal': () => closeModal(),
   pick: (el) => pickExercise(el.dataset.id),
+  'pr-cat': (el) => { prCat = el.dataset.cat; document.querySelectorAll('[data-act=pr-cat]').forEach((b) => b.classList.toggle('on', b.dataset.cat === prCat)); document.getElementById('pr-list').innerHTML = prList(); },
   'pick-cat': (el) => { pick.cat = el.dataset.cat; document.querySelectorAll('.chip-btn').forEach((b) => b.classList.toggle('on', b.dataset.cat === pick.cat)); document.getElementById('pick-list').innerHTML = pickerList(); document.getElementById('pick-list').scrollTop = 0; },
   'pick-info': async (el) => { modal.querySelector('.sheet').innerHTML = await infoHTML(el.dataset.id, { back: true, addable: true }); modal.querySelector('.sheet').scrollTop = 0; },
   'picker-back': () => renderPicker(),
@@ -1499,6 +1585,7 @@ document.addEventListener('click', (evt) => {
 document.addEventListener('input', async (evt) => {
   const el = evt.target;
   if (el.id === 'pick-q') { pick.query = el.value; document.getElementById('pick-list').innerHTML = pickerList(); return; }
+  if (el.id === 'pr-q') { prQuery = el.value; document.getElementById('pr-list').innerHTML = prList(); return; }
   if (el.id === 'progress-q') { progressQuery = el.value; document.getElementById('progress-list').innerHTML = progressList(); return; }
   if (el.dataset.planField === 'name' || el.dataset.planTarget != null) {
     const p = editingPlan();

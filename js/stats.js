@@ -193,3 +193,46 @@ export function prSetsInSession(session) {
   }
   return prs;
 }
+
+// ---------- personal records across everything (one pass, oldest → newest) ----------
+
+let prCache = { key: '', value: null };
+
+// Returns { events, bests }:
+//   events: every PR set in date order (a set that beat all earlier sessions of that exercise;
+//           the very first session of an exercise sets the baseline and is not counted)
+//   bests:  Map exerciseId → { best, bestSession, heaviest, heaviestSession, sessions }
+export function allPRs() {
+  const sessions = store.finishedSessions().slice().reverse();
+  const key = sessions.map((s) => s.id + s.updatedAt).join('|');
+  if (prCache.key === key) return prCache.value;
+  const bests = new Map();
+  const events = [];
+  for (const s of sessions) {
+    const seen = new Set();
+    for (const e of s.exercises) {
+      const ex = store.getExercise(e.exerciseId);
+      const kind = ex.kind || 'weight';
+      if (ex.pattern === 'stretch') continue;
+      const sets = e.sets.filter((x) => isValidSet(kind, x));
+      if (!sets.length) continue;
+      let b = bests.get(e.exerciseId);
+      const first = !b;
+      if (!b) { b = { best: null, bestScore: -Infinity, bestSession: null, heaviest: 0, heaviestSet: null, heaviestSession: null, sessions: 0, kind }; bests.set(e.exerciseId, b); }
+      if (!seen.has(e.exerciseId)) { b.sessions++; seen.add(e.exerciseId); }
+      for (const st of sets) {
+        const sc = score(kind, st);
+        if (sc > b.bestScore + 1e-9) {
+          if (!first) events.push({ exerciseId: e.exerciseId, set: st, session: s, kind, score: sc, prev: b.bestScore, prevSet: b.best });
+          b.best = st; b.bestScore = sc; b.bestSession = s;
+        }
+        if (kind === 'weight') {
+          const kg = isSidedSet(st) ? Math.min(st.kg || 0, st.kgR ?? st.kg ?? 0) : st.kg || 0;
+          if (kg > b.heaviest) { b.heaviest = kg; b.heaviestSet = st; b.heaviestSession = s; }
+        }
+      }
+    }
+  }
+  prCache = { key, value: { events, bests } };
+  return prCache.value;
+}

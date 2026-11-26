@@ -478,3 +478,9 @@ h2.inline { margin: 14px 4px 8px; }
 .habit-val { font-weight: 800; text-align: right; }
 .habit-n { grid-column: 1 / -1; }
 .habit-verdict { grid-column: 1 / -1; }
+
+/* personal records */
+.pr-link { display: flex; align-items: center; gap: 12px; }
+.pr-trophy { font-size: 28px; }
+.chev { font-size: 24px; color: var(--muted); }
+.pr-head { font-size: 17px; }

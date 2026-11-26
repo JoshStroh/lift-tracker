@@ -11,6 +11,7 @@ A gym log that runs as a home-screen app on iPhone. No App Store, no developer a
 - **Progressive overload suggestions** for every exercise you repeat: double progression with ACSM-style 2–10% load jumps, holds when you fall short, a ~10% back-off after two stalled sessions, an easier restart after a 3-week break, and "move to the harder variation" for calisthenics (rules in `js/suggest.js`)
 - **Reps left (RIR)** buttons in the rest timer after each set; the remaining sets are re-aimed live (±10% max, targeting ~2 reps in reserve) and future suggestions account for effort
 - Progress charts (estimated 1RM, heaviest, volume), rep-max PRs, 🏆 badges for new records
+- **Personal records page** (Progress → 🏆): latest PRs with how much you improved, and all-time bests for every exercise, searchable and filterable by muscle group
 - **Before-workout habits** (☕ coffee, 💊 creatine, 🍽️ fasted): one-tap chips that copy your last workout, plus a performance comparison on the Progress tab (each workout scored against your own recent sessions of the same lifts; it says when a difference is just normal variation)
 - **Body weight** log (kg) with a trend chart and 7 / 30 / 90-day change
 - Works offline; data is saved on the phone first, then synced to **your own private GitHub repo** as JSON

@@ -196,7 +196,7 @@ export function prSetsInSession(session) {
 
 // ---------- personal records across everything (one pass, oldest → newest) ----------
 
-let prCache = { key: '', value: null };
+let prCache = { key: null, value: null };
 
 // Returns { events, bests }:
 //   events: every PR set in date order (a set that beat all earlier sessions of that exercise;

@@ -489,3 +489,28 @@ h2.inline { margin: 14px 4px 8px; }
 .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .choices.areas { grid-template-columns: 1fr 1fr; }
 .choices.areas .choice { font-size: 14px; font-weight: 600; }
+
+/* drag to reorder */
+.drag-handle { touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; color: var(--muted); font-size: 20px; line-height: 1; padding: 10px 6px 10px 2px; margin-left: -4px; flex: none; }
+.plan-row .drag-handle { align-self: center; }
+.dragging { position: relative; z-index: 6; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22); transition: none !important; }
+.dragging .drag-handle { cursor: grabbing; color: var(--accent); }
+body.drag-active { user-select: none; -webkit-user-select: none; }
+body.drag-active .ex-card:not(.dragging), body.drag-active .plan-row:not(.dragging) { transition: transform 0.15s ease; }
+body.compact-cards .ex-card .ex-stats, body.compact-cards .ex-card table.sets, body.compact-cards .ex-card .add-set { display: none; }
+body.compact-cards .ex-card { padding: 6px 10px; }
+
+/* welcome */
+.welcome { padding: 14px 18px calc(16px + env(safe-area-inset-bottom)); }
+.welcome-hero { font-size: 52px; text-align: center; margin: 8px 0 0; }
+.welcome-list { padding-left: 18px; margin: 12px 0; }
+.welcome-list li { margin-bottom: 9px; }
+.steps.big li { font-size: 15px; margin-bottom: 10px; }
+.steps ul { padding-left: 16px; margin: 6px 0; }
+.kbd { display: inline-block; border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; background: var(--surface-2); }
+.guide summary { cursor: pointer; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.guide code, .welcome code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; font-size: 13px; }
+.welcome-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; position: sticky; bottom: -12px; background: var(--surface); padding: 10px 0 4px; }
+.wdots { display: flex; gap: 6px; }
+.wdots i { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+.wdots i.on { background: var(--accent); }

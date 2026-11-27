@@ -103,3 +103,76 @@ export async function openInfo(exerciseId, opts = {}) {
   const sheet = openModal('<p class="muted pad">Loading…</p>', { cls: 'info-sheet' });
   sheet.innerHTML = await infoHTML(exerciseId, opts);
 }
+
+// ---------- drag to reorder ----------
+// Press the handle and drag. Works with touch (iPhone) and mouse via Pointer Events.
+// opts: { item: selector, handle: selector, onMove(from, to), onStart(itemEl), onEnd() }
+export function makeSortable(container, opts) {
+  if (container.dataset.sortable) return;
+  container.dataset.sortable = '1';
+  container.addEventListener('pointerdown', (e) => {
+    const h = e.target.closest(opts.handle);
+    if (!h || !container.contains(h) || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    const el = h.closest(opts.item);
+    if (!el) return;
+    e.preventDefault();
+    const fingerY = e.clientY;
+    opts.onStart?.(el);
+    // after a possible layout change (compact mode), put the item back under the finger
+    let r0 = el.getBoundingClientRect();
+    window.scrollBy(0, r0.top + r0.height / 2 - fingerY);
+    const items = [...container.querySelectorAll(opts.item)];
+    const from = items.indexOf(el);
+    const scroll0 = window.scrollY;
+    const rects = items.map((i) => { const r = i.getBoundingClientRect(); return { top: r.top + window.scrollY, h: r.height }; });
+    const gap = rects.length > 1 ? Math.max(0, rects[1].top - (rects[0].top + rects[0].h)) : 0;
+    const startY = fingerY;
+    let lastY = fingerY;
+    let to = from;
+    let raf = 0;
+    el.classList.add('dragging');
+    document.body.classList.add('drag-active');
+    try { h.setPointerCapture(e.pointerId); } catch {}
+
+    const layout = () => {
+      const dy = lastY - startY + (window.scrollY - scroll0);
+      el.style.transform = `translateY(${dy}px)`;
+      const center = rects[from].top + rects[from].h / 2 + dy;
+      to = from;
+      for (let k = 0; k < from; k++) if (center < rects[k].top + rects[k].h / 2) { to = k; break; }
+      if (to === from) for (let k = rects.length - 1; k > from; k--) if (center > rects[k].top + rects[k].h / 2) { to = k; break; }
+      const shift = rects[from].h + gap;
+      items.forEach((it, k) => {
+        if (k === from) return;
+        const s = from < to && k > from && k <= to ? -shift : from > to && k >= to && k < from ? shift : 0;
+        it.style.transform = s ? `translateY(${s}px)` : '';
+      });
+    };
+    // scroll the page when dragging near the top or bottom edge
+    const tick = () => {
+      const tabs = document.getElementById('tabs')?.getBoundingClientRect().top ?? innerHeight;
+      const edge = 70;
+      let v = 0;
+      if (lastY < edge + 50) v = -Math.ceil((edge + 50 - lastY) / 6);
+      else if (lastY > tabs - edge) v = Math.ceil((lastY - (tabs - edge)) / 6);
+      if (v) { window.scrollBy(0, v); layout(); }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const move = (ev) => { lastY = ev.clientY; layout(); };
+    const end = () => {
+      cancelAnimationFrame(raf);
+      h.removeEventListener('pointermove', move);
+      h.removeEventListener('pointerup', end);
+      h.removeEventListener('pointercancel', end);
+      items.forEach((it) => { it.style.transform = ''; });
+      el.classList.remove('dragging');
+      document.body.classList.remove('drag-active');
+      opts.onEnd?.();
+      if (to !== from) opts.onMove(from, to);
+    };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+  });
+}

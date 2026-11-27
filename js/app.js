@@ -7,7 +7,7 @@ import * as gen from './generator.js';
 import { lineChart } from './chart.js';
 import { suggest, liveAdjust, RIR_LABEL } from './suggest.js';
 import * as habits from './habits.js';
-import { go, openModal, closeModal, actionSheet, runSheetAction, toast, thumb, visual, openInfo, infoHTML } from './ui.js';
+import { go, openModal, closeModal, actionSheet, runSheetAction, toast, thumb, visual, openInfo, infoHTML, makeSortable } from './ui.js';
 import { esc, uid, localDate, fmtNum, fmtDate, fmtTime, fmtDuration, fmtClock } from './util.js';
 
 const main = document.getElementById('main');
@@ -26,6 +26,7 @@ function route() {
 let mainDirty = false;
 const typing = () => {
   const a = document.activeElement;
+  if (document.body.classList.contains('drag-active')) return true; // never redraw mid-drag
   return a && main.contains(a) && a.matches('input:not([type=date]):not([type=checkbox]):not([type=radio]):not([type=file]), textarea');
 };
 
@@ -318,6 +319,7 @@ function planRow(p, e, i) {
   const unit = ex.kind === 'time' ? '' : ' reps';
   return `
     <div class="card plan-row">
+      <span class="drag-handle" aria-label="Drag to reorder" title="Drag to reorder">⠿</span>
       <button class="thumb-btn" data-act="info" data-id="${esc(ex.id)}" aria-label="How to do ${esc(ex.name)}">${thumb(ex)}</button>
       <div class="plan-row-main">
         <div class="row between"><strong>${esc(ex.name)}</strong>
@@ -370,6 +372,20 @@ function exerciseBlock(s, e, i, editing) {
 
   const sug = !editing && store.state.settings.suggest !== false ? suggest(e.exerciseId, e, s) : null;
   const live = sug ? liveAdjust(e.exerciseId, e, sug) : null; // re-aim remaining sets after each set
+  // After a finished set, predict the rest: follow the plan if you followed it, otherwise carry
+  // what you actually did forward (also for exercises with no history yet).
+  let lastDone = -1;
+  e.sets.forEach((x, k) => { if (x.done && stats.isValidSet(kind, x)) lastDone = k; });
+  const done = lastDone >= 0 ? e.sets[lastDone] : null;
+  const followedPlan = done && sug?.sets?.[lastDone] && (kind !== 'weight' || Math.abs((sug.sets[lastDone].kg ?? 0) - (done.kg ?? 0)) < 0.01);
+  const carryFor = (j) => {
+    if (!done || j <= lastDone || editing) return null;
+    if (followedPlan && sug.sets[j]) return sug.sets[j];
+    const planned = sug?.sets?.[j];
+    const c = { kg: done.kg, reps: planned?.reps ?? done.reps, sec: done.sec };
+    if (e.sides) Object.assign(c, { kgR: done.kgR ?? done.kg, repsR: planned?.repsR ?? done.repsR ?? done.reps, secR: done.secR ?? done.sec });
+    return c;
+  };
   const fields = kind === 'weight' ? [['kg', 'decimal'], ['reps', 'numeric']] : kind === 'reps' ? [['reps', 'numeric']] : [['sec', 'text']];
   const cols = kind === 'weight' ? ['kg', 'Reps'] : kind === 'reps' ? ['Reps'] : ['Time'];
 
@@ -382,7 +398,7 @@ function exerciseBlock(s, e, i, editing) {
   };
 
   const rows = e.sets.map((st, j) => {
-    const sp = (live && !st.done && live.sets[j]) || sug?.sets?.[j] || null; // suggested numbers for this set
+    const sp = st.done ? null : (live && live.sets[j]) || carryFor(j) || sug?.sets?.[j] || null; // predicted numbers for this set
     const p = sp || prev[j] || prev[prev.length - 1];
     const isPR = st.done && bestScore != null && stats.isValidSet(kind, st) && stats.score(kind, st) > bestScore + 1e-9;
     const check = `<button class="check" data-act="toggle-set" data-ex="${i}" data-set="${j}" aria-label="Done">${isPR ? '🏆' : '✓'}</button>`;
@@ -412,6 +428,7 @@ function exerciseBlock(s, e, i, editing) {
   return `
     <section class="card ex-card">
       <div class="ex-head">
+        <span class="drag-handle" aria-label="Drag to reorder" title="Drag to reorder">⠿</span>
         <button class="thumb-btn" data-act="info" data-id="${esc(ex.id)}" aria-label="How to do ${esc(ex.name)}">${thumb(ex, 'thumb sm')}</button>
         <button class="ex-name" data-act="ex-menu" data-ex="${i}">${esc(ex.name)}</button>
         <button class="icon" data-act="ex-menu" data-ex="${i}" aria-label="Exercise options">⋯</button>
@@ -1084,7 +1101,7 @@ function viewSettings() {
 
     <section class="card">
       <h3>GitHub sync</h3>
-      <p class="muted small">Backs up every workout to a private GitHub repo. See the README for the 3-minute setup.</p>
+      <p class="muted small">Backs up every workout to a private GitHub repo that only you can see. <button class="link-btn inline" data-act="show-backup-guide">Step-by-step setup guide</button></p>
       <form id="gh-form">
         <label class="field">GitHub username <input name="owner" value="${esc(g.owner)}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="your-username"></label>
         <label class="field">Private data repo <input name="repo" value="${esc(g.repo)}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="lift-data"></label>
@@ -1109,6 +1126,7 @@ function viewSettings() {
       </div>
     </section>
 
+    <button class="btn wide ghost" data-act="show-welcome">Show the welcome guide</button>
     <p class="muted small center">Lift Tracker · data stays on this phone and in your own GitHub repo.<br>Exercise photos: free-exercise-db (public domain).</p>
   `;
 }
@@ -1598,6 +1616,12 @@ const ACTIONS = {
     s.tags[el.dataset.k] = !s.tags[el.dataset.k];
     await store.saveDoc(s);
   },
+  'welcome-next': () => { if (welcomeStep >= WELCOME_STEPS.length - 1) return finishWelcome(); welcomeStep++; renderWelcome(); },
+  'welcome-back': () => { welcomeStep = Math.max(0, welcomeStep - 1); renderWelcome(); },
+  'welcome-close': () => finishWelcome(),
+  'welcome-settings': async () => { await finishWelcome(); go('#/settings'); setTimeout(() => document.querySelector('#gh-form [name=owner]')?.scrollIntoView({ block: 'center' }), 150); },
+  'show-welcome': () => openWelcome(),
+  'show-backup-guide': () => openWelcome('backup'),
   'sync-now': () => sync(),
   export: () => exportData(),
 };
@@ -1684,8 +1708,133 @@ function trackBarHeights() {
   window.addEventListener('orientationchange', () => setTimeout(set, 300));
 }
 
+// ================================================================ welcome / setup guide
+
+const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+const platform = () => (/iPhone|iPad|iPod/.test(navigator.userAgent) ? 'ios' : /Android/.test(navigator.userAgent) ? 'android' : 'other');
+
+let welcomeStep = 0;
+const WELCOME_STEPS = ['intro', 'install', 'backup', 'done'];
+
+function openWelcome(step = 'intro') {
+  welcomeStep = Math.max(0, WELCOME_STEPS.indexOf(step));
+  renderWelcome();
+}
+
+function renderWelcome() {
+  const step = WELCOME_STEPS[welcomeStep];
+  const dots = WELCOME_STEPS.map((_, i) => `<i class="${i === welcomeStep ? 'on' : ''}"></i>`).join('');
+  const nav = (next = 'Next') => `
+    <div class="welcome-nav">
+      ${welcomeStep > 0 ? '<button class="btn" data-act="welcome-back">Back</button>' : '<button class="link-btn" data-act="welcome-close">Skip</button>'}
+      <div class="wdots">${dots}</div>
+      <button class="btn primary" data-act="welcome-next">${next}</button>
+    </div>`;
+  let body = '';
+  if (step === 'intro') {
+    body = `
+      <div class="welcome-hero">🏋️</div>
+      <h2 class="info-title center">Welcome to Lift Tracker</h2>
+      <p class="center muted">A free gym log that lives on your phone.</p>
+      <ul class="welcome-list">
+        <li><strong>Log fast</strong>: every exercise shows last time, your best, and a suggested next weight.</li>
+        <li><strong>Plan ahead</strong>: Push / Pull / Legs quick starts, or let the app build a workout for you.</li>
+        <li><strong>Calisthenics</strong> skill tracks from beginner to elite.</li>
+        <li><strong>Progress</strong>: charts, personal records, body weight and habits.</li>
+        <li><strong>Private</strong>: your data stays on this phone (and in your own backup if you set one up). Nobody else can see it.</li>
+      </ul>
+      ${nav()}`;
+  } else if (step === 'install') {
+    const p = platform();
+    body = `
+      <h2 class="info-title">Put it on your home screen</h2>
+      ${isStandalone() ? '<div class="card levelup"><div>✓ You\'re already using the home-screen app. Nice.</div></div>' : p === 'ios' ? `
+        <p>It works like a normal app once it's on your home screen (full screen, works offline).</p>
+        <ol class="steps big">
+          <li>Make sure this page is open in <strong>Safari</strong>.</li>
+          <li>Tap the <strong>Share</strong> button <span class="kbd">⬆︎</span> at the bottom of the screen.</li>
+          <li>Scroll down and tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
+          <li>Open <strong>Lifts</strong> from your home screen from now on.</li>
+        </ol>
+        <p class="small muted">Use the home-screen app rather than the Safari tab: they keep separate data.</p>` : p === 'android' ? `
+        <ol class="steps big">
+          <li>Open this page in <strong>Chrome</strong>.</li>
+          <li>Tap the <strong>⋮</strong> menu, then <strong>Install app</strong> (or <strong>Add to Home screen</strong>).</li>
+          <li>Open <strong>Lifts</strong> from your home screen from now on.</li>
+        </ol>` : `
+        <p>On your phone, open this same link and add it to your home screen (Safari → Share → Add to Home Screen on iPhone; Chrome → ⋮ → Install app on Android).</p>`}
+      ${nav()}`;
+  } else if (step === 'backup') {
+    body = `
+      <h2 class="info-title">Back up your workouts</h2>
+      <p>Your data is saved on this phone. If the phone is lost or replaced, it's gone unless you have a backup. Two options:</p>
+      <details class="card guide" open>
+        <summary><strong>Automatic backup to GitHub</strong> <span class="chip">free · recommended</span></summary>
+        <p class="small muted">About 5 minutes, easiest on a computer. Your data goes to a private repository that only you can see.</p>
+        <ol class="steps">
+          <li>Create a free account at <a href="https://github.com/signup" target="_blank" rel="noopener">github.com/signup</a>.</li>
+          <li>Create a <strong>private</strong> repository called <code>lift-data</code>: <a href="https://github.com/new?name=lift-data&visibility=private" target="_blank" rel="noopener">open the form</a>, check it's set to <strong>Private</strong>, tap <strong>Create repository</strong>. Leave it empty.</li>
+          <li>Create an access token: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">open the token form</a> (choose <strong>Fine-grained</strong> if asked).
+            <ul>
+              <li><strong>Name:</strong> Lift Tracker</li>
+              <li><strong>Expiration:</strong> the longest offered (set a reminder to renew it)</li>
+              <li><strong>Repository access:</strong> Only select repositories → <code>lift-data</code></li>
+              <li><strong>Permissions → Repository → Contents:</strong> Read and write</li>
+            </ul>
+            Tap <strong>Generate token</strong> and copy it (starts with <code>github_pat_</code>).</li>
+          <li>In <strong>Settings → GitHub sync</strong> here, enter your GitHub username, <code>lift-data</code> and the token, then tap <strong>Save &amp; sync</strong>. The badge at the top should say <strong>Synced</strong>.</li>
+        </ol>
+        <button class="btn wide" data-act="welcome-settings">Open sync settings</button>
+      </details>
+      <details class="card guide">
+        <summary><strong>Manual backup file</strong></summary>
+        <p class="small">Every so often, go to <strong>Settings → Export JSON</strong> and save the file somewhere safe (e.g. iCloud Drive or email it to yourself). Restore with <strong>Import JSON</strong>.</p>
+      </details>
+      ${nav()}`;
+  } else {
+    body = `
+      <div class="welcome-hero">✅</div>
+      <h2 class="info-title center">You're set</h2>
+      <ul class="welcome-list">
+        <li>Start with a <strong>Quick start</strong> day on the Workout tab, or tap <strong>Create for me</strong>.</li>
+        <li>Tick ✓ after each set. The rest timer starts, and you can tap how many <strong>reps you had left</strong>.</li>
+        <li>Doing bodyweight training? Set your level on each track in the <strong>Calisthenics</strong> tab.</li>
+        <li>This guide is in <strong>Settings</strong> if you need it again.</li>
+      </ul>
+      ${nav("Let's go")}`;
+  }
+  openModal(body, { cls: 'welcome' });
+}
+
+async function finishWelcome() {
+  closeModal();
+  if (!store.state.settings.welcomed) await store.saveSettings({ welcomed: true });
+}
+
+function maybeShowWelcome() {
+  // only for brand-new users: existing users with data never see it automatically
+  if (!store.state.settings.welcomed && store.state.records.size === 0) openWelcome();
+}
+
+function setupReorder() {
+  makeSortable(main, {
+    item: '.ex-card, .plan-row',
+    handle: '.drag-handle',
+    onStart: (el) => { if (el.classList.contains('ex-card')) document.body.classList.add('compact-cards'); },
+    onEnd: () => { document.body.classList.remove('compact-cards'); if (mainDirty) setTimeout(renderMain, 0); },
+    onMove: async (from, to) => {
+      const doc = route().name === 'plan' ? editingPlan() : editingSession();
+      if (!doc) return;
+      const [x] = doc.exercises.splice(from, 1);
+      doc.exercises.splice(to, 0, x);
+      await store.saveDoc(doc);
+    },
+  });
+}
+
 async function boot() {
   trackBarHeights();
+  setupReorder();
   await store.init();
   store.onChange(render);
   store.setSyncHandler(sync);
@@ -1698,6 +1847,7 @@ async function boot() {
     window.scrollTo(0, 0);
   });
   render();
+  maybeShowWelcome();
   sync();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') { sync(); render(); }

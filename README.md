@@ -6,7 +6,9 @@ A gym log that runs as a home-screen app on iPhone. No App Store, no developer a
 - **Left / right logging** for one-arm and one-leg work, with an imbalance readout and separate Left/Right progress lines
 - **Plan ahead:** a 7-day strip on the Workout tab; **Create for me** (rule-based generator) or **Build my own**, by type (Push, Pull, Legs, Core & Abs, Stretch, Full body) and style (Conventional, Calisthenics, Mixed); save for any day
 - **Calisthenics tab:** 15 progression tracks (pull-up, dips, rows, push-up, squat, hinge, core, leg raise, muscle-up, L-sit, handstand, HSPU, front lever, back lever, planche), automatic "ready to level up" detection, and a Beginner → Elite rank
-- Quick-start Push / Pull / Legs / Abs & Stretch days that copy what you did last time
+- **Welcome guide** for first-time users (install to home screen + step-by-step backup setup), also under Settings
+- **Drag to reorder** exercises (⠿ handle) in workouts and plans
+- Quick-start Push / Pull / Legs / Core & Recovery days that copy what you did last time
 - Each exercise shows **last time** and your **all-time best**; tick a set to start the rest timer
 - **Progressive overload suggestions** for every exercise you repeat: double progression with ACSM-style 2–10% load jumps, holds when you fall short, a ~10% back-off after two stalled sessions, an easier restart after a 3-week break, and "move to the harder variation" for calisthenics (rules in `js/suggest.js`)
 - **Reps left (RIR)** buttons in the rest timer after each set; the remaining sets are re-aimed live (±10% max, targeting ~2 reps in reserve) and future suggestions account for effort

@@ -514,3 +514,34 @@ body.compact-cards .ex-card { padding: 6px 10px; }
 .wdots { display: flex; gap: 6px; }
 .wdots i { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
 .wdots i.on { background: var(--accent); }
+
+/* celebrations */
+.burst { position: fixed; inset: 0; pointer-events: none; z-index: 40; overflow: hidden; }
+.burst span { position: absolute; line-height: 1; will-change: transform, opacity; text-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.recap { text-align: left; }
+.recap-hero { font-size: 56px; text-align: center; margin-top: 6px; }
+.recap-row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 15px; }
+.recap-week { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin: 14px 0 8px; display: grid; gap: 4px; }
+.badge-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; padding: 5px 10px 5px 5px; border-radius: 99px; background: var(--surface-2); }
+.badge-chip .bi, .ach .bi, .almost .bi { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--surface); font-size: 16px; }
+/* tiers: bronze, silver, gold, platinum */
+.t1 .bi, .bi.t1 { box-shadow: 0 0 0 2px #b0703c inset; }
+.t2 .bi, .bi.t2 { box-shadow: 0 0 0 2px #9aa3ad inset; }
+.t3 .bi, .bi.t3 { box-shadow: 0 0 0 2px #d4a017 inset; }
+.t4 .bi, .bi.t4 { box-shadow: 0 0 0 2px #7cc7e8 inset, 0 0 10px rgba(124,199,232,.6); }
+.ach-summary .hero-num { font-size: 36px; }
+.ach-bar { display: block; height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 6px 0 4px; }
+.ach-bar.big { height: 10px; }
+.ach-bar span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.ach-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ach { display: flex; flex-direction: column; gap: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; opacity: .78; }
+.ach.got { opacity: 1; }
+.ach:not(.got) .bi { filter: grayscale(1); opacity: .6; }
+.ach .bi { width: 40px; height: 40px; font-size: 22px; margin-bottom: 4px; }
+.ach.got.t3, .ach.got.t4 { border-color: color-mix(in srgb, var(--gold) 50%, var(--border)); }
+.tier-label { font-weight: 700; color: var(--gold); }
+.almost { display: grid; gap: 10px; color: inherit; }
+.almost-row { display: flex; align-items: center; gap: 10px; }
+.almost-row .ach-bar { margin: 5px 0 0; }
+@media (prefers-reduced-motion: reduce) { .burst { display: none; } }

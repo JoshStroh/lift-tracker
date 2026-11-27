@@ -7,6 +7,7 @@ import * as gen from './generator.js';
 import { lineChart } from './chart.js';
 import { suggest, liveAdjust, RIR_LABEL } from './suggest.js';
 import * as habits from './habits.js';
+import * as ach from './achievements.js';
 import { go, openModal, closeModal, actionSheet, runSheetAction, toast, thumb, visual, openInfo, infoHTML, makeSortable } from './ui.js';
 import { esc, uid, localDate, fmtNum, fmtDate, fmtTime, fmtDuration, fmtClock } from './util.js';
 
@@ -37,7 +38,7 @@ function render() {
   renderMain();
 }
 
-const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali', bodyweight: 'progress', prs: 'progress' };
+const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali', bodyweight: 'progress', prs: 'progress', achievements: 'progress' };
 
 function renderMain() {
   const r = route();
@@ -51,6 +52,7 @@ function renderMain() {
     case 'progress': main.innerHTML = viewProgress(); drawBwSpark(); break;
     case 'bodyweight': main.innerHTML = viewBodyweight(); drawBwChart(); break;
     case 'prs': main.innerHTML = viewPRs(); break;
+    case 'achievements': main.innerHTML = viewAchievements(); store.state.settings.achRetro && store.saveSettings({ achRetro: 0 }); break;
     case 'exercise': main.innerHTML = viewExercise(r.id); drawExerciseChart(r.id); break;
     case 'plan': main.innerHTML = viewPlan(r.id); break;
     case 'cali': main.innerHTML = viewCali(); break;
@@ -171,6 +173,7 @@ function viewStart() {
       <button class="btn ghost" data-act="start-empty">Empty workout</button>
     </div>
 
+    ${almostCard()}
     ${others.length ? `<h2>Saved plans</h2>${others.map((p) => planCard(p, false)).join('')}` : ''}
     ${recent.length ? `<h2>Recent</h2>${recent.map(sessionCard).join('')}` : `
       <div class="card hint">
@@ -492,10 +495,105 @@ async function toggleSet(i, j) {
     }
     st.done = true;
     if (!s.endedAt) startRest(undefined, { i, j, kind });
+    // PR? beats every earlier session and every set already done today
+    const prior = stats.historyFor(e.exerciseId, { excludeId: s.id, before: s.endedAt ? s.startedAt : undefined });
+    const priorBest = prior.length ? stats.score(kind, stats.bestSet(kind, prior.flatMap((h) => h.sets))) : null;
+    const today = s.exercises.filter((x) => x.exerciseId === e.exerciseId).flatMap((x) => x.sets).filter((x) => x !== st && x.done && stats.isValidSet(kind, x));
+    const todayBest = today.length ? Math.max(...today.map((x) => stats.score(kind, x))) : -Infinity;
+    const sc = stats.score(kind, st);
+    const isPR = priorBest != null && store.getExercise(e.exerciseId).category !== 'Recovery' && sc > priorBest + 1e-9 && sc > todayBest + 1e-9;
+    // heaviest weight ever handled (for weighted lifts), even if the estimated max isn't a PR
+    const kgOf = (x) => (stats.isSidedSet(x) ? Math.min(x.kg || 0, x.kgR ?? x.kg ?? 0) : x.kg || 0);
+    const priorHeavy = kind === 'weight' && prior.length ? Math.max(...prior.flatMap((h) => h.sets).map(kgOf)) : null;
+    const todayHeavy = today.length ? Math.max(...today.map(kgOf)) : 0;
+    const isHeaviest = !isPR && priorHeavy != null && priorHeavy > 0 && kgOf(st) > priorHeavy + 1e-9 && kgOf(st) > todayHeavy + 1e-9;
+    await store.saveDoc(s);
+    const btn = main.querySelector(`[data-act="toggle-set"][data-ex="${i}"][data-set="${j}"]`);
+    if (isPR) { celebrate(btn, { count: 16 }); chime('pr'); toast(`🏆 New PR: ${store.exerciseName(e.exerciseId)} ${stats.shortLabel(kind, st)}`); }
+    else if (isHeaviest) { celebrate(btn, { count: 12 }); chime('pr'); toast(`🏋️ Heaviest ever: ${fmtNum(kgOf(st))} kg on ${store.exerciseName(e.exerciseId)}`); }
+    if (!s.endedAt) celebrateAchievements(ach.fresh({ includeActive: true }), btn, isPR || isHeaviest);
+    return;
   } else {
     st.done = false;
   }
   await store.saveDoc(s);
+}
+
+// ================================================================ celebrations
+
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// A quick burst of stars from an element (or the top-centre of the screen).
+function celebrate(el, { count = 16, big = false } = {}) {
+  if (reducedMotion()) return;
+  const r = el?.getBoundingClientRect?.();
+  const x = r ? r.left + r.width / 2 : innerWidth / 2;
+  const y = r ? r.top + r.height / 2 : innerHeight * 0.32;
+  const layer = document.createElement('div');
+  layer.className = 'burst';
+  document.body.append(layer);
+  const glyphs = big ? ['★', '✦', '●', '▲', '★'] : ['★', '✦', '★'];
+  const colors = ['var(--gold)', 'var(--accent)', 'var(--done-ink)', 'var(--t4)'];
+  for (let k = 0; k < count; k++) {
+    const p = document.createElement('span');
+    p.textContent = glyphs[k % glyphs.length];
+    p.style.left = `${x}px`; p.style.top = `${y}px`;
+    p.style.color = colors[k % colors.length];
+    p.style.fontSize = `${(big ? 12 : 10) + Math.random() * (big ? 14 : 10)}px`;
+    layer.append(p);
+    const a = (Math.PI * 2 * k) / count + Math.random() * 0.5;
+    const dist = (big ? 140 : 60) + Math.random() * (big ? 160 : 50);
+    const dx = Math.cos(a) * dist, dy = Math.sin(a) * dist - (big ? 60 : 20);
+    p.animate([
+      { transform: 'translate(-50%, -50%) scale(0.4) rotate(0deg)', opacity: 1 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(1) rotate(${Math.random() * 300 - 150}deg)`, opacity: 1, offset: 0.7 },
+      { transform: `translate(calc(-50% + ${dx * 1.1}px), calc(-50% + ${dy + (big ? 80 : 30)}px)) scale(0.8)`, opacity: 0 },
+    ], { duration: big ? 1300 : 800, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'forwards' });
+  }
+  if (el && !big) el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 400, easing: 'ease-out' });
+  setTimeout(() => layer.remove(), big ? 1500 : 1000);
+}
+
+// Short chimes (optional; Settings → Celebration sounds).
+function chime(kind = 'pr') {
+  if (store.state.settings.sounds === false) return;
+  try {
+    if (!audioCtx) return;
+    const notes = kind === 'big' ? [523.25, 659.25, 783.99, 1046.5] : kind === 'ach' ? [659.25, 987.77] : [783.99, 1046.5];
+    const t0 = audioCtx.currentTime;
+    notes.forEach((f, k) => {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'triangle';
+      o.frequency.value = f;
+      const t = t0 + k * 0.09;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.25, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(t); o.stop(t + 0.4);
+    });
+  } catch {}
+}
+
+async function celebrateAchievements(list, el, quiet = false) {
+  if (!list.length) return;
+  await ach.markSeen(list);
+  const top = list.sort((a, b) => b.tier - a.tier)[0];
+  setTimeout(() => {
+    toast(`🏅 Achievement unlocked: ${top.title}${list.length > 1 ? ` (+${list.length - 1} more)` : ''}`);
+    celebrate(el, { count: 22, big: top.tier >= 3 });
+    if (!quiet) chime('ach');
+  }, quiet ? 900 : 0);
+}
+
+// One-time: everything already earned from history is marked as unlocked (no celebration spam).
+async function initAchievements() {
+  if (store.state.settings.achInit) return;
+  const earned = ach.evaluate({ includeActive: false }).filter((a) => a.unlocked);
+  await ach.markSeen(earned);
+  await store.saveSettings({ achInit: true, achRetro: earned.length });
+  if (earned.length >= 3) setTimeout(() => toast(`🏅 You've already earned ${earned.length} achievements — see Progress → Achievements`), 1500);
 }
 
 function cleanSets(s) {
@@ -524,7 +622,50 @@ async function finishWorkout() {
     await store.saveDoc(plan, { render: false });
   }
   store.scheduleSync(500);
+  const fresh = ach.fresh({ includeActive: false });
+  await ach.markSeen(fresh);
+  pendingRecap = s.id;
   go(`#/session/${encodeURIComponent(s.id)}`);
+}
+
+let pendingRecap = null;
+
+function showRecap(id) {
+  const s = store.getDoc(id);
+  if (!s) return;
+  const prs = stats.prSetsInSession(s);
+  const prList = s.exercises.flatMap((e) => e.sets.filter((st) => prs.has(st)).map((st) => ({ e, st })));
+  const earned = ach.evaluate({ includeActive: false }).filter((a) => a.unlocked && a.unlockedAt === s.startedAt);
+  const sets = s.exercises.reduce((n, e) => n + e.sets.length, 0);
+  const vol = stats.sessionVolume(s);
+  const wk = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return store.finishedSessions().filter((x) => new Date(x.startedAt) >= d).length; })();
+  const streak = ach.streakNow();
+  const next = ach.almostThere(1)[0];
+  openModal(`
+    <div class="recap">
+      <div class="recap-hero">💪</div>
+      <h2 class="info-title center">Workout complete</h2>
+      <p class="center muted">${esc(s.name)} · ${esc(fmtDuration(new Date(s.endedAt) - new Date(s.startedAt)))}</p>
+      <div class="tiles">
+        <div class="tile"><span class="tile-num">${s.exercises.length}</span><span class="tile-label">Exercises</span></div>
+        <div class="tile"><span class="tile-num">${sets}</span><span class="tile-label">Sets</span></div>
+        <div class="tile"><span class="tile-num">${vol >= 1000 ? fmtNum(vol / 1000) + 't' : fmtNum(vol)}</span><span class="tile-label">${vol >= 1000 ? 'Tonnes' : 'kg'} lifted</span></div>
+      </div>
+      ${prList.length ? `<h4>🏆 ${prList.length} new PR${prList.length > 1 ? 's' : ''}</h4>${prList.map(({ e, st }) => `<div class="recap-row"><span>${esc(store.exerciseName(e.exerciseId))}</span><strong>${esc(stats.setLabel(store.getExercise(e.exerciseId).kind, st))}</strong></div>`).join('')}` : ''}
+      ${earned.length ? `<h4>🏅 Achievements unlocked</h4><div class="badge-row">${earned.map(badgeChip).join('')}</div>` : ''}
+      <div class="recap-week">
+        <div><strong>${wk}</strong> workout${wk === 1 ? '' : 's'} this week${wk >= 3 ? ' ✓' : ` · ${3 - wk} more for the weekly goal`}</div>
+        ${streak ? `<div>🔥 ${streak}-week streak</div>` : ''}
+      </div>
+      ${next ? `<p class="small muted center">Almost there: <strong>${esc(next.title)}</strong> (${esc(ach.progressText(next))})</p>` : ''}
+      <button class="btn wide primary" data-act="close-modal">Done</button>
+    </div>`, { cls: 'recap-sheet' });
+  const big = prList.length || earned.length;
+  setTimeout(() => { celebrate(document.querySelector('.recap-hero'), { count: big ? 34 : 18, big: !!big }); chime(big ? 'big' : 'pr'); }, 120);
+}
+
+function badgeChip(a) {
+  return `<span class="badge-chip t${a.tier}"><span class="bi">${a.icon}</span>${esc(a.title)}</span>`;
 }
 
 // ================================================================ history
@@ -651,6 +792,7 @@ function viewProgress() {
       <div class="tile"><span class="tile-num">${finished.length}</span><span class="tile-label">All time</span></div>
     </div>
     ${prCard()}
+    ${achCard()}
     ${bwCard()}
     ${habitsCard()}
     <h2>Exercises</h2>
@@ -834,6 +976,81 @@ function prList() {
       <span class="right"><strong class="pr-head">${esc(head)}</strong><span class="small muted block">${headLabel}</span></span>
     </a>`;
   }).join('');
+}
+
+// ================================================================ achievements
+
+function achCard() {
+  const all = ach.evaluate({ includeActive: false });
+  const got = all.filter((a) => a.unlocked);
+  const latest = got.filter((a) => a.unlockedAt).sort((a, b) => b.unlockedAt.localeCompare(a.unlockedAt))[0];
+  return `
+    <a class="card pr-link" href="#/achievements">
+      <span class="pr-trophy">🏅</span>
+      <span class="grow"><strong>Achievements</strong>
+        <span class="small muted block">${got.length} of ${all.length} unlocked${latest ? ` · latest: ${esc(latest.title)}` : ''}</span></span>
+      <span class="chev">›</span>
+    </a>`;
+}
+
+function almostCard() {
+  const list = ach.almostThere(3);
+  if (!list.length) return '';
+  return `<h2>Almost there</h2>
+    <a class="card almost" href="#/achievements">${list.map((a) => `
+      <div class="almost-row"><span class="bi t${a.tier}">${a.icon}</span>
+        <span class="grow"><strong>${esc(a.title)}</strong><span class="ach-bar"><span style="width:${Math.round(a.progress * 100)}%"></span></span></span>
+        <span class="small muted">${esc(ach.progressText(a))}</span></div>`).join('')}
+    </a>`;
+}
+
+let achFamily = 'All';
+let achShowAll = false;
+
+function viewAchievements() {
+  const all = ach.evaluate({ includeActive: false });
+  const got = all.filter((a) => a.unlocked).length;
+  const retro = store.state.settings.achRetro;
+  const fams = ach.FAMILIES.filter((f) => achFamily === 'All' || f === achFamily);
+  return `
+    <a class="back" href="#/progress">‹ Progress</a>
+    <h1 class="tight">🏅 Achievements</h1>
+    <div class="ach-summary card">
+      <div><span class="hero-num">${got}</span><span class="muted"> / ${all.length}</span></div>
+      <div class="ach-bar big"><span style="width:${Math.round((got / all.length) * 100)}%"></span></div>
+      <div class="small muted">${['Bronze', 'Silver', 'Gold', 'Platinum'].map((t, i) => `${all.filter((a) => a.unlocked && a.tier === i + 1).length} ${t}`).join(' · ')}</div>
+    </div>
+    ${retro ? `<div class="card levelup"><div>🎉 Welcome to achievements! <strong>${retro}</strong> were unlocked from your workout history.</div></div>` : ''}
+    <div class="cat-chips">${['All', ...ach.FAMILIES].map((f) => `<button class="chip-btn ${achFamily === f ? 'on' : ''}" data-act="ach-family" data-f="${f}">${f}</button>`).join('')}</div>
+    ${fams.map((f) => {
+      const full = all.filter((a) => a.family === f);
+      // compact view: what you've earned + the next step of each ladder
+      const nextOf = new Set();
+      const list = achShowAll ? full : full.filter((a) => {
+        if (a.unlocked) return true;
+        if (nextOf.has(a.metric)) return false;
+        nextOf.add(a.metric);
+        return true;
+      });
+      if (!list.length) return '';
+      return `<h2>${f} <span class="muted small normal">${full.filter((a) => a.unlocked).length}/${full.length}</span></h2>
+        <div class="ach-grid">${list.map(achTile).join('')}</div>`;
+    }).join('')}
+    <button class="btn wide ghost" data-act="ach-all">${achShowAll ? 'Show earned + next steps only' : `Show all ${all.length} achievements`}</button>
+    <p class="muted small pad">Achievements are worked out from your own workouts, body weight and calisthenics levels. Streaks are weekly (3+ workouts) and one quiet week per quarter is forgiven, because rest is part of training.</p>
+  `;
+}
+
+function achTile(a) {
+  const secret = a.hidden && !a.unlocked;
+  return `<div class="ach ${a.unlocked ? 'got' : ''} t${a.tier}">
+    <span class="bi">${secret ? '❔' : a.icon}</span>
+    <strong>${esc(secret ? 'Hidden' : a.title)}</strong>
+    <span class="small muted">${esc(secret ? 'Keep training to discover it' : a.desc)}</span>
+    ${a.unlocked
+      ? `<span class="small tier-label">${ach.TIER_NAMES[a.tier]}${a.unlockedAt ? ` · ${esc(fmtDate(a.unlockedAt, { day: 'numeric', month: 'short', year: 'numeric' }))}` : ''}</span>`
+      : secret ? '' : `<span class="ach-bar"><span style="width:${Math.round(a.progress * 100)}%"></span></span><span class="small muted">${esc(ach.progressText(a))}</span>`}
+  </div>`;
 }
 
 // ================================================================ habits
@@ -1095,6 +1312,7 @@ function viewSettings() {
     <section class="card">
       <h3>Progressive overload</h3>
       <label class="check-field"><input type="checkbox" data-setting="suggest" ${st.suggest !== false ? 'checked' : ''}> Suggest next weights &amp; reps</label>
+      <label class="check-field"><input type="checkbox" data-setting="sounds" ${st.sounds !== false ? 'checked' : ''}> Celebration sounds (PRs, achievements)</label>
       <p class="muted small">Uses double progression: add reps until every set hits the top of your range, then add 2.5–5% weight (ACSM guideline: 2–10% once you beat your target reps). Holds the weight if you fall short, backs off ~10% after two stalled sessions, and eases you back in after a 3-week break. Suggestions appear as the grey numbers in each set — tick ✓ to accept them.</p>
       <p class="muted small"><strong>Reps left (RIR):</strong> after each set, tap Max / 1 / 2 / 3+ in the rest timer. If a set was too easy or too hard, the remaining sets are re-aimed at about 2 reps left (never more than ±10% per change), and next session's suggestion takes your effort into account. Optional — skip it and everything still works.</p>
     </section>
@@ -1534,6 +1752,9 @@ const ACTIONS = {
     await cali.setLevel(t.id, cali.currentIndex(t.id) + 1);
     const r = cali.rank();
     toast(r.tier > before ? `New rank: ${r.name}! 🎉` : `${t.name}: levelled up (+${t.steps[cali.currentIndex(t.id) - 1]?.tier || 1} pts)`);
+    celebrate(r.tier > before ? null : el, { count: r.tier > before ? 40 : 20, big: r.tier > before });
+    chime(r.tier > before ? 'big' : 'ach');
+    celebrateAchievements(ach.fresh({ includeActive: false }), null, true);
   },
   focus: (el) => cali.toggleFocus(el.dataset.track),
   'cali-plan': async () => {
@@ -1622,6 +1843,8 @@ const ACTIONS = {
   'welcome-settings': async () => { await finishWelcome(); go('#/settings'); setTimeout(() => document.querySelector('#gh-form [name=owner]')?.scrollIntoView({ block: 'center' }), 150); },
   'show-welcome': () => openWelcome(),
   'show-backup-guide': () => openWelcome('backup'),
+  'ach-family': (el) => { achFamily = el.dataset.f; renderMain(); },
+  'ach-all': () => { achShowAll = !achShowAll; renderMain(); },
   'sync-now': () => sync(),
   export: () => exportData(),
 };
@@ -1672,6 +1895,7 @@ document.addEventListener('change', async (evt) => {
   const el = evt.target;
   if (el.dataset.setting === 'restSeconds') await store.saveSettings({ restSeconds: +el.value });
   if (el.dataset.setting === 'suggest') await store.saveSettings({ suggest: el.checked });
+  if (el.dataset.setting === 'sounds') { await store.saveSettings({ sounds: el.checked }); if (el.checked) { unlockAudio(); chime('pr'); } }
   if (el.id === 'import-file' && el.files[0]) await importData(el.files[0]);
   if (el.dataset.planField === 'date') { const p = editingPlan(); p.date = el.value || null; await store.saveDoc(p); }
   if (el.id === 'wiz-date') wiz.date = el.value || null;
@@ -1845,9 +2069,11 @@ async function boot() {
     renderHeader();
     renderMain();
     window.scrollTo(0, 0);
+    if (pendingRecap) { const id = pendingRecap; pendingRecap = null; showRecap(id); }
   });
   render();
   maybeShowWelcome();
+  initAchievements();
   sync();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') { sync(); render(); }

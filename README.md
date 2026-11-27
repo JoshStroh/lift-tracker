@@ -13,6 +13,7 @@ A gym log that runs as a home-screen app on iPhone. No App Store, no developer a
 - **Progressive overload suggestions** for every exercise you repeat: double progression with ACSM-style 2–10% load jumps, holds when you fall short, a ~10% back-off after two stalled sessions, an easier restart after a 3-week break, and "move to the harder variation" for calisthenics (rules in `js/suggest.js`)
 - **Reps left (RIR)** buttons in the rest timer after each set; the remaining sets are re-aimed live (±10% max, targeting ~2 reps in reserve) and future suggestions account for effort
 - Progress charts (estimated 1RM, heaviest, volume), rep-max PRs, 🏆 badges for new records
+- **Rewards:** star burst + optional chime on a new PR or heaviest-ever lift, a workout recap after Finish, and 113 achievements (strength milestones, bodyweight-relative lifts, push-up/pull-up/pistol ladders, skills, weekly streaks, lifetime volume, hidden fun ones) that unlock live and retroactively from history (`js/achievements.js`); respects Reduce Motion
 - **Personal records page** (Progress → 🏆): latest PRs with how much you improved, and all-time bests for every exercise, searchable and filterable by muscle group
 - **Before-workout habits** (☕ coffee, 💊 creatine, 🍽️ fasted): one-tap chips that copy your last workout, plus a performance comparison on the Progress tab (each workout scored against your own recent sessions of the same lifts; it says when a difference is just normal variation)
 - **Recovery** category (formerly Stretch): quick whole-routine entries (lower body, upper body, shoulders, hips, back, full body, yoga flow), foam roller and massage ball work, plus individual stretches; logged by time and left out of PRs and progression suggestions. **Create for me → Recovery** asks which areas to focus on (presets: hamstrings + hips, lower body, upper body, full body) and builds ~60 s of rolling per area followed by 2 × 30 s stretches
@@ -88,6 +89,7 @@ js/poses.js      stick-figure diagrams for skills without photos
 js/ui.js         shared sheets, thumbnails, exercise info
 js/suggest.js    progressive overload rules
 js/habits.js     before-workout habits + performance score
+js/achievements.js  achievement definitions + engine
 img/ex/          exercise photos + instructions
 js/stats.js      bests, PRs, chart metrics
 js/chart.js      SVG line chart

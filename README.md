@@ -13,6 +13,7 @@ A gym log that runs as a home-screen app on iPhone. No App Store, no developer a
 - **Progressive overload suggestions** for every exercise you repeat: double progression with ACSM-style 2–10% load jumps, holds when you fall short, a ~10% back-off after two stalled sessions, an easier restart after a 3-week break, and "move to the harder variation" for calisthenics (rules in `js/suggest.js`)
 - **Reps left (RIR)** buttons in the rest timer after each set; the remaining sets are re-aimed live (±10% max, targeting ~2 reps in reserve) and future suggestions account for effort
 - Progress charts (estimated 1RM, heaviest, volume), rep-max PRs, 🏆 badges for new records
+- **Gym buddy:** a round cartoon mascot you design (colour, shape, hair, outfit, shoes) that earns XP and coins from workouts, weekly goals, PRs and achievements (retroactive). Level up to unlock ~40 shop items; its look also reflects your training (strength → muscle, endurance → sparkle, recovery → wiggle). Art can be replaced with ChatGPT/Canva images, see `docs/BUDDY_ART.md`
 - **Rewards:** star burst + optional chime on a new PR or heaviest-ever lift, a workout recap after Finish, and 113 achievements (strength milestones, bodyweight-relative lifts, push-up/pull-up/pistol ladders, skills, weekly streaks, lifetime volume, hidden fun ones) that unlock live and retroactively from history (`js/achievements.js`); respects Reduce Motion
 - **Personal records page** (Progress → 🏆): latest PRs with how much you improved, and all-time bests for every exercise, searchable and filterable by muscle group
 - **Before-workout habits** (☕ coffee, 💊 creatine, 🍽️ fasted): one-tap chips that copy your last workout, plus a performance comparison on the Progress tab (each workout scored against your own recent sessions of the same lifts; it says when a difference is just normal variation)
@@ -90,6 +91,8 @@ js/ui.js         shared sheets, thumbnails, exercise info
 js/suggest.js    progressive overload rules
 js/habits.js     before-workout habits + performance score
 js/achievements.js  achievement definitions + engine
+js/buddy.js      gym buddy: art layers, shop items, XP/coin economy
+docs/            buddy art guide + reference images
 img/ex/          exercise photos + instructions
 js/stats.js      bests, PRs, chart metrics
 js/chart.js      SVG line chart

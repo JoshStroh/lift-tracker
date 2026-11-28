@@ -17,7 +17,7 @@
 import * as store from './store.js';
 
 const API = 'https://api.github.com';
-const DIRS = { session: 'sessions', exercise: 'exercises', plan: 'plans', cali: 'calisthenics', bodyweight: 'bodyweight' };
+const DIRS = { session: 'sessions', exercise: 'exercises', plan: 'plans', cali: 'calisthenics', bodyweight: 'bodyweight', buddy: 'buddy' };
 
 class GitHubError extends Error {
   constructor(status, message) { super(message); this.status = status; }

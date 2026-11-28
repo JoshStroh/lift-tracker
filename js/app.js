@@ -8,6 +8,7 @@ import { lineChart } from './chart.js';
 import { suggest, liveAdjust, RIR_LABEL } from './suggest.js';
 import * as habits from './habits.js';
 import * as ach from './achievements.js';
+import * as buddy from './buddy.js';
 import { go, openModal, closeModal, actionSheet, runSheetAction, toast, thumb, visual, openInfo, infoHTML, makeSortable } from './ui.js';
 import { esc, uid, localDate, fmtNum, fmtDate, fmtTime, fmtDuration, fmtClock } from './util.js';
 
@@ -38,7 +39,7 @@ function render() {
   renderMain();
 }
 
-const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali', bodyweight: 'progress', prs: 'progress', achievements: 'progress' };
+const TAB_FOR = { session: 'history', exercise: 'progress', plan: 'workout', track: 'cali', bodyweight: 'progress', prs: 'progress', achievements: 'progress', buddy: 'workout' };
 
 function renderMain() {
   const r = route();
@@ -52,6 +53,7 @@ function renderMain() {
     case 'progress': main.innerHTML = viewProgress(); drawBwSpark(); break;
     case 'bodyweight': main.innerHTML = viewBodyweight(); drawBwChart(); break;
     case 'prs': main.innerHTML = viewPRs(); break;
+    case 'buddy': main.innerHTML = buddy.get() && r.id !== 'create' ? viewBuddy() : viewCreator(); break;
     case 'achievements': main.innerHTML = viewAchievements(); store.state.settings.achRetro && store.saveSettings({ achRetro: 0 }); break;
     case 'exercise': main.innerHTML = viewExercise(r.id); drawExerciseChart(r.id); break;
     case 'plan': main.innerHTML = viewPlan(r.id); break;
@@ -134,6 +136,7 @@ function viewStart() {
 
   return `
     <h1>Workout</h1>
+    ${buddyCard()}
     <div class="week" role="tablist">
       ${days.map((d) => {
         const dt = new Date(d + 'T12:00:00');
@@ -643,7 +646,8 @@ function showRecap(id) {
   const next = ach.almostThere(1)[0];
   openModal(`
     <div class="recap">
-      <div class="recap-hero">💪</div>
+      <div class="recap-hero">${buddy.get() ? buddy.render(buddy.get().look, { mood: 'excited', size: 120, stats: buddy.trainingStats() }) : '💪'}</div>
+      ${(() => { const before = buddy.economy({ excludeSessionId: s.id }); const after = buddy.economy(); const dc = after.earned - before.earned, dx = after.xp - before.xp; if (!buddy.get() || (dc <= 0 && dx <= 0)) return ''; return `<div class="recap-reward"><span>🪙 +${dc} coins</span><span>✨ +${dx} XP</span></div>${after.level > before.level ? `<div class="card levelup"><div>⬆️ <strong>${esc(buddy.get().name)} reached level ${after.level}!</strong> New items may be unlocked in the shop.</div></div>` : ''}`; })()}
       <h2 class="info-title center">Workout complete</h2>
       <p class="center muted">${esc(s.name)} · ${esc(fmtDuration(new Date(s.endedAt) - new Date(s.startedAt)))}</p>
       <div class="tiles">
@@ -1845,6 +1849,48 @@ const ACTIONS = {
   'show-backup-guide': () => openWelcome('backup'),
   'ach-family': (el) => { achFamily = el.dataset.f; renderMain(); },
   'ach-all': () => { achShowAll = !achShowAll; renderMain(); },
+  'creator-set': (el) => {
+    creatorLook[el.dataset.slot] = el.dataset.id;
+    creatorName = document.getElementById('buddy-name')?.value ?? creatorName;
+    // previews in the other rows depend on the look, so redraw those rows too
+    const scroll = window.scrollY;
+    renderMain(); window.scrollTo(0, scroll);
+  },
+  'creator-save': async () => {
+    const name = (document.getElementById('buddy-name')?.value || '').trim() || 'Buddy';
+    const first = !buddy.get();
+    await buddy.save({ name, look: { ...creatorLook } });
+    creatorLook = null; creatorName = '';
+    go('#/buddy');
+    if (first) setTimeout(() => { toast(`Say hi to ${name}! 🎉`); celebrate(document.querySelector('.buddy-hero svg'), { count: 30, big: true }); chime('big'); }, 120);
+  },
+  'buddy-tab': (el) => { buddyTab = el.dataset.tab; renderMain(); },
+  'wardrobe-slot': (el) => { wardrobeSlot = el.dataset.slot; renderMain(); },
+  equip: async (el) => { await buddy.equip(el.dataset.slot, el.dataset.id || null); },
+  'shop-item': (el) => {
+    const it = buddy.getItem(el.dataset.id);
+    const eco = buddy.economy();
+    const b = buddy.get();
+    openModal(`
+      <div class="info-head"><span></span><button class="link-btn" data-act="close-modal">Close</button></div>
+      <div class="center">${buddy.render({ ...b.look, [it.slot]: it.id }, { size: 150, mood: 'excited', stats: buddy.trainingStats() })}</div>
+      <h2 class="info-title center">${esc(it.name)}</h2>
+      <p class="center muted">${eco.level < it.level ? `Unlocks at level ${it.level} (you're level ${eco.level}).` : eco.coins < it.price ? `Costs 🪙 ${it.price}. You have 🪙 ${eco.coins}, so ${it.price - eco.coins} more to go.` : `Costs 🪙 ${it.price}. You have 🪙 ${eco.coins}.`}</p>
+      <button class="btn wide primary" data-act="buy" data-id="${it.id}" ${eco.level < it.level || eco.coins < it.price ? 'disabled' : ''}>Buy &amp; wear it</button>`);
+  },
+  buy: async (el) => {
+    const it = buddy.getItem(el.dataset.id);
+    const res = await buddy.buy(it.id);
+    closeModal();
+    if (!res.ok) return toast(res.why);
+    toast(`${it.name} unlocked! 🛍️`);
+    setTimeout(() => { celebrate(document.querySelector('.buddy-hero svg'), { count: 24, big: true }); chime('ach'); }, 80);
+  },
+  'buddy-rename': async () => {
+    const b = buddy.get();
+    const name = prompt('Buddy name', b.name);
+    if (name && name.trim()) await buddy.save({ name: name.trim().slice(0, 16) });
+  },
   'sync-now': () => sync(),
   export: () => exportData(),
 };
@@ -1932,13 +1978,130 @@ function trackBarHeights() {
   window.addEventListener('orientationchange', () => setTimeout(set, 300));
 }
 
+// ================================================================ gym buddy
+
+function buddyCard() {
+  const b = buddy.get();
+  if (!b) {
+    return `<a class="card buddy-card cta" href="#/buddy">
+      ${buddy.render(buddy.DEFAULT_LOOK, { size: 70, anim: false })}
+      <span class="grow"><strong>Create your gym buddy</strong><span class="small muted block">It earns coins and XP from your training. You already have ${buddy.economy().earned} coins waiting.</span></span>
+      <span class="chev">›</span></a>`;
+  }
+  const eco = buddy.economy();
+  return `<a class="card buddy-card" href="#/buddy">
+    ${buddy.render(b.look, { size: 74, stats: buddy.trainingStats() })}
+    <span class="grow">
+      <span class="row between"><strong>${esc(b.name)}</strong><span class="coins">🪙 ${eco.coins}</span></span>
+      <span class="small muted block">Level ${eco.level} · ${eco.into} / ${eco.need} XP</span>
+      <span class="xp-bar"><span style="width:${Math.round(eco.pct * 100)}%"></span></span>
+    </span></a>`;
+}
+
+let creatorLook = null;
+let creatorName = '';
+
+function viewCreator() {
+  const existing = buddy.get();
+  creatorLook ||= { ...(existing?.look || buddy.DEFAULT_LOOK) };
+  creatorName ||= existing?.name || '';
+  const opt = (slot) => buddy.ITEMS.filter((i) => i.slot === slot && (i.price === 0 || buddy.owns(i.id)));
+  const row = (slot, label) => `
+    <h4>${label}</h4>
+    <div class="opt-row">${opt(slot).map((i) => {
+      const preview = slot === 'color' || slot === 'hairColor'
+        ? `<span class="swatch" style="background:${i.c}"></span>`
+        : buddy.render({ ...creatorLook, [slot]: i.id }, { size: 52, anim: false });
+      return `<button class="opt ${creatorLook[slot] === i.id ? 'on' : ''}" data-act="creator-set" data-slot="${slot}" data-id="${i.id}" aria-label="${esc(i.name)}">${preview}<small>${esc(i.name)}</small></button>`;
+    }).join('')}</div>`;
+  return `
+    ${existing ? '<a class="back" href="#/buddy">‹ Your buddy</a>' : '<a class="back" href="#/workout">‹ Workout</a>'}
+    <h1 class="tight">${existing ? 'Change look' : 'Create your gym buddy'}</h1>
+    <div class="creator-preview" id="creator-preview">${buddy.render(creatorLook, { size: 170, stats: buddy.trainingStats() })}</div>
+    <label class="field">Name <input id="buddy-name" value="${esc(creatorName)}" placeholder="e.g. Gains, Spud, Tank" maxlength="16" autocomplete="off"></label>
+    ${row('color', 'Colour')}${row('shape', 'Body shape')}${row('hair', 'Hair')}${row('hairColor', 'Hair colour')}${row('outfit', 'Outfit')}${row('shoes', 'Shoes')}
+    <p class="muted small">Body shape is just a look. Change it any time, for free. Your buddy changes with your training instead: lifting builds muscle, cardio and bodyweight work add energy, recovery makes it loose and bendy.</p>
+    <button class="btn wide primary" data-act="creator-save">${existing ? 'Save look' : 'Create my buddy'}</button>
+  `;
+}
+
+let buddyTab = 'wardrobe';
+let wardrobeSlot = 'outfit';
+
+function viewBuddy() {
+  const b = buddy.get();
+  const eco = buddy.economy();
+  const ts = buddy.trainingStats();
+  const statRow = (k) => {
+    const info = buddy.STAT_INFO[k];
+    const lv = ts[k].level;
+    return `<div class="stat-row"><span class="stat-ico">${info.icon}</span>
+      <span class="grow"><strong>${info.label}</strong> <span class="muted small">level ${lv}/4</span>
+      <span class="xp-bar"><span style="width:${(lv / 4) * 100}%"></span></span>
+      <span class="small muted">From ${info.from} · gives ${info.look}</span></span></div>`;
+  };
+  const slots = buddy.SLOTS.filter((x) => !['color', 'shape', 'hairColor'].includes(x.id) || true);
+  let content = '';
+  if (buddyTab === 'wardrobe') {
+    const items = buddy.ITEMS.filter((i) => i.slot === wardrobeSlot && buddy.owns(i.id));
+    const optional = ['head', 'face', 'hand', 'back', 'bg'].includes(wardrobeSlot);
+    content = `
+      <div class="cat-chips">${slots.map((x) => `<button class="chip-btn ${wardrobeSlot === x.id ? 'on' : ''}" data-act="wardrobe-slot" data-slot="${x.id}">${x.label}</button>`).join('')}</div>
+      <div class="item-grid">
+        ${optional ? `<button class="item ${!b.look[wardrobeSlot] ? 'on' : ''}" data-act="equip" data-slot="${wardrobeSlot}" data-id="">${buddy.render({ ...b.look, [wardrobeSlot]: null }, { size: 64, anim: false })}<small>None</small></button>` : ''}
+        ${items.map((i) => `<button class="item ${b.look[wardrobeSlot] === i.id ? 'on' : ''}" data-act="equip" data-slot="${i.slot}" data-id="${i.id}">${buddy.render({ ...b.look, [i.slot]: i.id }, { size: 64, anim: false })}<small>${esc(i.name)}</small></button>`).join('')}
+      </div>
+      ${items.length <= 1 && !optional ? '<p class="muted small center">Get more in the Shop.</p>' : optional && !items.length ? '<p class="muted small center">Nothing here yet. Check the Shop.</p>' : ''}`;
+  } else if (buddyTab === 'shop') {
+    const forSale = buddy.ITEMS.filter((i) => !buddy.owns(i.id)).sort((x, y) => x.level - y.level || x.price - y.price);
+    content = forSale.length ? `<div class="item-grid shop">${forSale.map((i) => {
+      const locked = eco.level < i.level;
+      const short = !locked && eco.coins < i.price;
+      return `<button class="item ${locked ? 'locked' : ''}" data-act="shop-item" data-id="${i.id}">
+        ${buddy.render({ ...b.look, [i.slot]: i.id }, { size: 64, anim: false })}
+        <small>${esc(i.name)}</small>
+        <span class="price ${short ? 'short' : ''}">${locked ? `🔒 Level ${i.level}` : `🪙 ${i.price}`}</span>
+      </button>`;
+    }).join('')}</div>` : '<p class="center pad">You own everything. Legend. 👑</p>';
+  } else {
+    content = `<div class="card earn">
+      <div class="earn-row"><span>Finish a workout</span><strong>+10 🪙 · +50 XP (+2 XP per set)</strong></div>
+      <div class="earn-row"><span>Weekly goal (3 workouts)</span><strong>+30 🪙 · +100 XP</strong></div>
+      <div class="earn-row"><span>New PR</span><strong>+5 🪙 · +15 XP</strong></div>
+      <div class="earn-row"><span>Achievement</span><strong>+10 to 100 🪙 · +50 to 200 XP</strong></div>
+      <div class="earn-row"><span>Weigh-in</span><strong>+2 🪙</strong></div>
+      <p class="small muted">Up to 2 workouts a day count, so training more often isn't "better". Rest days never cost you anything.</p>
+    </div>`;
+  }
+  return `
+    <div class="buddy-hero">
+      ${buddy.render(b.look, { size: 210, stats: ts })}
+      <button class="title-btn" data-act="buddy-rename">${esc(b.name)} <span class="muted">✎</span></button>
+      <div class="muted small">Level ${eco.level} · ${eco.into} / ${eco.need} XP to level ${eco.level + 1}</div>
+      <div class="xp-bar big"><span style="width:${Math.round(eco.pct * 100)}%"></span></div>
+      <div class="row gap center-row"><span class="coins big">🪙 ${eco.coins}</span><a class="btn small-btn" href="#/buddy/create">Change look</a></div>
+    </div>
+    <section class="card">${statRow('strength')}${statRow('endurance')}${statRow('mobility')}${ts.daysSince != null && ts.daysSince > 10 ? '<p class="small muted">💤 Your buddy is a bit sleepy. One workout wakes it right up.</p>' : ''}</section>
+    <div class="seg" role="tablist">
+      ${[['wardrobe', 'Wardrobe'], ['shop', 'Shop'], ['earn', 'How to earn']].map(([k, l]) => `<button class="${buddyTab === k ? 'on' : ''}" data-act="buddy-tab" data-tab="${k}">${l}</button>`).join('')}
+    </div>
+    ${content}
+  `;
+}
+
+function refreshCreatorPreview() {
+  const el = document.getElementById('creator-preview');
+  if (el) el.innerHTML = buddy.render(creatorLook, { size: 170, stats: buddy.trainingStats() });
+  document.querySelectorAll('[data-act=creator-set]').forEach((b) => b.classList.toggle('on', creatorLook[b.dataset.slot] === b.dataset.id));
+}
+
 // ================================================================ welcome / setup guide
 
 const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 const platform = () => (/iPhone|iPad|iPod/.test(navigator.userAgent) ? 'ios' : /Android/.test(navigator.userAgent) ? 'android' : 'other');
 
 let welcomeStep = 0;
-const WELCOME_STEPS = ['intro', 'install', 'backup', 'done'];
+const WELCOME_STEPS = ['intro', 'buddy', 'install', 'backup', 'done'];
 
 function openWelcome(step = 'intro') {
   welcomeStep = Math.max(0, WELCOME_STEPS.indexOf(step));
@@ -1967,6 +2130,14 @@ function renderWelcome() {
         <li><strong>Progress</strong>: charts, personal records, body weight and habits.</li>
         <li><strong>Private</strong>: your data stays on this phone (and in your own backup if you set one up). Nobody else can see it.</li>
       </ul>
+      ${nav()}`;
+  } else if (step === 'buddy') {
+    body = `
+      <div class="welcome-hero">${buddy.render({ ...buddy.DEFAULT_LOOK, hand: 'shaker' }, { mood: 'excited', size: 150 })}</div>
+      <h2 class="info-title center">Meet your gym buddy</h2>
+      <p class="center">Every workout, PR and achievement earns your buddy <strong>XP</strong> and <strong>coins</strong>. Level up to unlock new colours, outfits, shoes, hats and backgrounds in the shop.</p>
+      <p class="center muted small">Your buddy also shows your training: lifting builds muscle, cardio and bodyweight work add energy, recovery makes it loose and bendy.</p>
+      <p class="center small">You'll design yours on the Workout tab.</p>
       ${nav()}`;
   } else if (step === 'install') {
     const p = platform();
